@@ -47,33 +47,85 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         });
     }
 
+    // src/chatViewProvider.ts 里的 _getHtmlForWebview 方法
+
     private _getHtmlForWebview(webview: vscode.Webview) {
         return `<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <style>
-        body { background: transparent; color: var(--vscode-foreground); font-family: var(--vscode-font-family); padding: 10px; }
-        #chat-container { display: flex; flex-direction: column; height: 100vh; }
-        #messages { flex-grow: 1; overflow-y: auto; margin-bottom: 10px; }
-        .msg { margin-bottom: 12px; padding: 8px; border-radius: 4px; line-height: 1.4; word-wrap: break-word; }
-        .user { background: var(--vscode-button-secondaryBackground); align-self: flex-end; margin-left: 20px; }
-        .ai { background: var(--vscode-sideBar-background); border: 1px solid var(--vscode-panel-border); margin-right: 20px; }
-        .loading { font-style: italic; opacity: 0.7; font-size: 0.8em; }
-        textarea { 
-            width: 100%; background: var(--vscode-input-background); color: var(--vscode-input-foreground);
-            border: 1px solid var(--vscode-input-border); border-radius: 4px; resize: none; padding: 8px;
-            box-sizing: border-box;
+        /* TUI 风格全局样式 */
+        body, html { 
+            margin: 0; padding: 0; height: 100%; overflow: hidden; 
+            background-color: var(--vscode-sideBar-background);
+            color: var(--vscode-terminal-foreground);
+            font-family: var(--vscode-editor-font-family), monospace;
+            font-size: 12px;
         }
-        pre { background: rgba(0,0,0,0.2); padding: 8px; overflow-x: auto; border-radius: 4px; }
-        code { font-family: var(--vscode-editor-font-family); font-size: 0.9em; }
+
+        #app {
+            display: flex; flex-direction: column;
+            height: 100vh; width: 100%;
+        }
+
+        /* 消息区域：自动撑开，内部滚动 */
+        #messages {
+            flex: 1; overflow-y: auto; padding: 10px;
+            border-bottom: 2px solid var(--vscode-panel-border);
+            scrollbar-width: thin;
+        }
+
+        .msg { margin-bottom: 15px; border-left: 2px solid transparent; padding-left: 8px; }
+        .user { border-left-color: var(--vscode-terminal-ansiCyan); color: var(--vscode-terminal-ansiCyan); }
+        .ai { border-left-color: var(--vscode-terminal-ansiGreen); }
+        
+        /* 角色标签 */
+        .role { font-weight: bold; margin-bottom: 4px; text-transform: uppercase; }
+
+        /* 输入区域：固定在底部 */
+        #input-container {
+            padding: 10px; background: var(--vscode-sideBar-background);
+        }
+
+        .input-wrapper {
+            display: flex; align-items: flex-start;
+            border: 1px solid var(--vscode-panel-border);
+            padding: 4px; background: rgba(0,0,0,0.2);
+        }
+
+        .prompt-char { color: var(--vscode-terminal-ansiGreen); margin-right: 8px; font-weight: bold; }
+
+        textarea { 
+            flex: 1; background: transparent; color: inherit; font-family: inherit;
+            border: none; outline: none; resize: none; padding: 0; margin: 0;
+            line-height: 1.5;
+        }
+
+        /* TUI 代码块 */
+        pre { 
+            background: #1e1e1e; border: 1px dashed #444; padding: 8px; 
+            overflow-x: auto; color: #d4d4d4; 
+        }
     </style>
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 </head>
 <body>
-    <div id="chat-container">
-        <div id="messages"></div>
-        <textarea id="input" rows="3" placeholder="问问 Opengravity... (Ctrl+Enter 发送)"></textarea>
+    <div id="app">
+        <div id="messages">
+            <div class="msg ai">
+                <div class="role">[SYSTEM]</div>
+                <div>Opengravity Terminal Ready...</div>
+            </div>
+        </div>
+        
+        <div id="input-container">
+            <div class="input-wrapper">
+                <span class="prompt-char">></span>
+                <textarea id="input" rows="3" placeholder="TYPE YOUR COMMAND..."></textarea>
+            </div>
+            <div style="font-size: 9px; opacity: 0.5; margin-top: 4px;">CTRL+ENTER TO EXECUTE</div>
+        </div>
     </div>
 
     <script>
@@ -84,45 +136,25 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         function appendMsg(role, text) {
             const div = document.createElement('div');
             div.className = 'msg ' + role;
-            if (role === 'ai') {
-                div.innerHTML = marked.parse(text);
-            } else {
-                div.textContent = text;
-            }
+            const roleName = role === 'user' ? 'USER' : 'GRAVITY';
+            div.innerHTML = \`<div class="role">[\${roleName}]</div><div>\${role === 'ai' ? marked.parse(text) : text}</div>\`;
             messagesDiv.appendChild(div);
             messagesDiv.scrollTop = messagesDiv.scrollHeight;
-            return div;
-        }
-
-        function send() {
-            const text = inputArea.value.trim();
-            if (!text) return;
-            
-            appendMsg('user', text);
-            const loadingDiv = appendMsg('ai loading', 'Thinking...');
-            
-            vscode.postMessage({ type: 'userInput', value: text });
-            inputArea.value = '';
-
-            // 存一下这个 loading 节点的引用，方便一会儿替换它
-            window.currentLoadingDiv = loadingDiv;
         }
 
         inputArea.addEventListener('keydown', e => {
-            if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) send();
+            if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+                const text = inputArea.value.trim();
+                if (!text) return;
+                appendMsg('user', text);
+                vscode.postMessage({ type: 'userInput', value: text });
+                inputArea.value = '';
+            }
         });
 
         window.addEventListener('message', event => {
-            const message = event.data;
-            if (window.currentLoadingDiv) {
-                window.currentLoadingDiv.remove();
-                window.currentLoadingDiv = null;
-            }
-
-            if (message.type === 'aiResponse') {
-                appendMsg('ai', message.value);
-            } else if (message.type === 'error') {
-                appendMsg('ai', '❌ Error: ' + message.value);
+            if (event.data.type === 'aiResponse') {
+                appendMsg('ai', event.data.value);
             }
         });
     </script>
