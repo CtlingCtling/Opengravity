@@ -9,7 +9,9 @@
   "categories": [
     "Other"
   ],
-  "activationEvents": [],
+  "activationEvents": [
+    "onCommand:opengravity.ask"
+  ],
   "main": "./out/extension.js",
   "contributes": {
     "commands": [
@@ -24,7 +26,10 @@
         "properties": {
           "opengravity.provider": {
             "type": "string",
-            "enum": [ "deepseek", "gemini" ],
+            "enum": [
+              "deepseek",
+              "gemini"
+            ],
             "default": "deepseek",
             "description": "The AI provider to use."
           },
@@ -47,7 +52,7 @@
   },
   "devDependencies": {
     "@types/mocha": "^10.0.10",
-    "@types/node": "22.x",
+    "@types/node": "^25.1.0",
     "@types/vscode": "^1.108.1",
     "@vscode/test-cli": "^0.0.12",
     "@vscode/test-electron": "^2.5.2",

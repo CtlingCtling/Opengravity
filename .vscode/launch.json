@@ -17,5 +17,8 @@
 			],
 			"preLaunchTask": "${defaultBuildTask}"
 		}
+	],
+	"activationEvents": [
+		"onCommand:opengravity.ask"
 	]
 }
