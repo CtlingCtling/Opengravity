@@ -17,7 +17,7 @@
         {
           "id": "opengravity-sidebar",
           "title": "Opengravity",
-          "icon": "media/icon.svg"
+          "icon": "media/icon.png"
         }
       ]
     },
@@ -26,7 +26,8 @@
         {
           "type": "webview",
           "id": "opengravity.chatView",
-          "name": "Gravity Chat"
+          "name": "Chat",
+          "icon": "media/icon.png"
         }
       ]
     },
