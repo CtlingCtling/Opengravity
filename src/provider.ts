@@ -1,52 +1,82 @@
-import OpenAI from "openai"; // 【修改】引入 openai 库
+import OpenAI from "openai";
+
+// 定义流式更新的数据结构
+export interface StreamUpdate {
+    type: 'reasoning' | 'content'; // 是思考过程，还是正文？
+    delta: string;                 // 这次吐出的字符
+}
 
 export interface AIProvider {
-    generateContent(prompt: string, systemPrompt?: string): Promise<string>;
+    // 旧的非流式方法可以保留作为备用，或者删掉
+    // 新增流式方法：
+    generateContentStream(
+        prompt: string, 
+        onUpdate: (update: StreamUpdate) => void, 
+        systemPrompt?: string
+    ): Promise<string>; // 返回完整的最终内容用于存历史
 }
 
 export class DeepSeekProvider implements AIProvider {
     private openai: OpenAI;
 
     constructor(apiKey: string) {
-        // 【修改】在构造函数里初始化 openai 客户端
         this.openai = new OpenAI({
-            baseURL: 'https://api.deepseek.com/v1', // 注意：官方路径通常是 /v1
+            baseURL: 'https://api.deepseek.com', // 确认是用 v1 还是根路径，DeepSeek 有时会有变动，通常是 base
             apiKey: apiKey,
         });
     }
 
-    async generateContent(prompt: string, systemPrompt?: string): Promise<string> {
+    async generateContentStream(
+        prompt: string, 
+        onUpdate: (update: StreamUpdate) => void, 
+        systemPrompt?: string
+    ): Promise<string> {
         try {
-            // 【修改】使用 openai.chat.completions.create
-            const completion = await this.openai.chat.completions.create({
-                model: "deepseek-chat",
+            const stream = await this.openai.chat.completions.create({
+                model: "deepseek-reasoner", // 👈 使用推理模型 R1
                 messages: [
                     { role: "system", content: systemPrompt || "You are a helpful assistant." },
                     { role: "user", content: prompt }
-                ]
+                ],
+                stream: true, // 👈 开启流式
             });
 
-            // 从返回结果中解析出内容
-            return completion.choices[0].message.content || "No content returned.";
+            let fullContent = "";
 
-        } catch (error) {
-            console.error(error);
-            // 错误处理更具体
-            if (error instanceof OpenAI.APIError) {
-                return `DeepSeek API Error: ${error.status} - ${error.message}`;
+            for await (const chunk of stream) {
+                const delta = chunk.choices[0]?.delta;
+                
+                // 1. 处理思维链 (DeepSeek 特有字段)
+                // TS 不知道有这个字段，所以要 as any
+                const reasoning = (delta as any).reasoning_content;
+                if (reasoning) {
+                    onUpdate({ type: 'reasoning', delta: reasoning });
+                }
+
+                // 2. 处理正文
+                if (delta?.content) {
+                    fullContent += delta.content;
+                    onUpdate({ type: 'content', delta: delta.content });
+                }
             }
-            return `An unexpected error occurred: ${error}`;
+
+            return fullContent;
+
+        } catch (error: any) {
+            console.error(error);
+            // 发生错误时，把它伪装成一段正文发回去
+            const errorMsg = `[Error]: ${error.message}`;
+            onUpdate({ type: 'content', delta: errorMsg });
+            return errorMsg;
         }
     }
 }
-// --- (3) 预留“Gemini 引擎”的位置 (现在先不写) ---
-export class GeminiProvider implements AIProvider {
-    constructor(apiKey: string) {
-        // ...
-    }
 
-    async generateContent(prompt: string, systemPrompt?: string): Promise<string> {
-        // TODO: 在这里实现调用 Gemini API 的逻辑
-        return "Gemini provider is not implemented yet.";
+// Gemini 暂时留空或照葫芦画瓢
+export class GeminiProvider implements AIProvider {
+    constructor(apiKey: string) {}
+    async generateContentStream(prompt: string, onUpdate: (update: StreamUpdate) => void, systemPrompt?: string): Promise<string> {
+        onUpdate({ type: 'content', delta: "Gemini stream not implemented yet." });
+        return "Gemini stream not implemented yet.";
     }
 }
