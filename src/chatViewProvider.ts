@@ -95,288 +95,313 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     }
 
     private _getHtmlForWebview(webview: vscode.Webview) {
-        // TUI 风格 HTML/CSS 保持不变
         return `<!DOCTYPE html>
-<html lang="en">
+<html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <style>
         :root {
-            --term-bg: #0c0c0c;
-            --term-user: #00ffff; /* 青色 */
-            --term-ai: #00ff00;   /* 绿色 */
-            --term-gray: #666666;
-            --term-border: #333333;
-            --font-mono: 'Consolas', 'Courier New', monospace;
+            --bg-color: var(--vscode-editor-background);
+            --text-color: var(--vscode-editor-foreground);
+            --accent-color: var(--vscode-textLink-foreground);
+            --border-color: var(--vscode-panel-border);
+            --code-bg: var(--vscode-textBlockQuote-background);
+            --user-msg-bg: var(--vscode-button-secondaryBackground);
+            --ai-msg-border: var(--vscode-activityBar-activeBorder);
         }
 
         body {
-            background-color: var(--term-bg);
-            color: #cccccc;
-            font-family: var(--font-mono);
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            font-family: 'JetBrains Mono', 'Fira Code', var(--vscode-editor-font-family), monospace;
             margin: 0;
             padding: 0;
             height: 100vh;
             display: flex;
             flex-direction: column;
             overflow: hidden;
+            font-size: 13px;
+            line-height: 1.5;
         }
 
-        ::-webkit-scrollbar { width: 8px; }
-        ::-webkit-scrollbar-thumb { background: #333; }
-        ::-webkit-scrollbar-track { background: #000; }
+        /* 滚动条 */
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-thumb { background: var(--border-color); border-radius: 3px; }
+        ::-webkit-scrollbar-track { background: transparent; }
 
-        #terminal-output {
+        #chat-container {
             flex: 1;
-            padding: 10px;
+            padding: 20px;
             overflow-y: auto;
             display: flex;
             flex-direction: column;
-            gap: 15px;
+            gap: 24px;
         }
 
-        /* 消息块样式 */
-        .msg-block {
-            border: 1px solid transparent;
-            padding: 5px;
-            position: relative;
+        /* 消息块通用样式 */
+        .message {
+            display: flex;
+            flex-direction: column;
+            max-width: 100%;
+            animation: fadeIn 0.3s ease;
         }
 
-        .role-label {
-            font-size: 0.8em;
-            font-weight: bold;
-            margin-bottom: 5px;
-            display: inline-block;
-            padding: 0 4px;
-            border: 1px solid;
-        }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
 
-        /* 用户消息 */
-        .msg-user .role-label {
-            color: var(--term-bg);
-            background-color: var(--term-user);
-            border-color: var(--term-user);
+        /* 用户消息：极简风格 */
+        .msg-user {
+            align-items: flex-end;
         }
-        .msg-user .content {
-            color: var(--term-user);
-            border-left: 2px solid var(--term-user);
-            padding-left: 8px;
-            white-space: pre-wrap;
+        .msg-user .bubble {
+            background: var(--user-msg-bg);
+            padding: 8px 12px;
+            border-radius: 6px;
+            border-bottom-right-radius: 2px;
+            color: var(--text-color);
+            max-width: 85%;
+            word-wrap: break-word;
+            border: 1px solid var(--border-color);
         }
-
-        /* AI 消息 */
-        .msg-ai .role-label {
-            color: var(--term-bg);
-            background-color: var(--term-ai);
-            border-color: var(--term-ai);
-        }
-        .msg-ai .content {
-            color: #eeeeee;
-            border-left: 2px solid var(--term-ai);
-            padding-left: 8px;
-        }
-
-        /* 错误消息 */
-        .msg-error {
-            color: #ff3333;
-            border: 1px dashed #ff3333;
-            padding: 10px;
-        }
-
-        /* 思考过程 (Log样式) */
-        .reasoning-box {
-            font-family: var(--font-mono);
-            font-size: 0.85em;
-            color: var(--term-gray);
-            border: 1px dashed var(--term-gray);
-            background: #111;
-            padding: 8px;
-            margin-bottom: 8px;
-            display: none; 
-        }
-        .reasoning-header {
-            text-transform: uppercase;
-            border-bottom: 1px dashed var(--term-gray);
+        .msg-user .label {
+            font-size: 10px;
+            color: var(--accent-color);
             margin-bottom: 4px;
-            padding-bottom: 2px;
+            opacity: 0.8;
         }
 
-        /* Markdown 样式 */
-        .content p { margin: 5px 0; }
-        .content pre { 
-            background: #1a1a1a; 
-            border: 1px solid #444; 
-            padding: 10px; 
-            overflow-x: auto;
+        /* AI 消息：现代 TUI 风格 */
+        .msg-ai {
+            align-items: flex-start;
+            padding-left: 12px;
+            border-left: 2px solid var(--ai-msg-border);
         }
-        .content code {
-            font-family: var(--font-mono);
+        .msg-ai .label {
+            font-weight: bold;
+            color: var(--accent-color);
+            margin-bottom: 6px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        
+        /* 思考过程：日志风格 */
+        .thought-process {
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            color: #888;
+            background: var(--code-bg);
+            padding: 8px;
+            margin-bottom: 10px;
+            border-radius: 4px;
+            border: 1px dashed #444;
+            display: none; /* 默认隐藏 */
+        }
+        .thought-process.active {
+            display: block;
+        }
+        .thought-process::before {
+            content: "⚡ ANALYZING...";
+            display: block;
+            font-weight: bold;
+            margin-bottom: 4px;
+            color: #aaa;
+        }
+
+        /* 正文内容 */
+        .markdown-body p { margin: 0 0 10px 0; }
+        .markdown-body pre { 
+            background: #111; 
+            padding: 10px; 
+            border-radius: 4px; 
+            overflow-x: auto; 
+            border: 1px solid #333;
+        }
+        .markdown-body code {
+            font-family: inherit;
             background: #222;
             padding: 2px 4px;
+            border-radius: 3px;
+            color: #e6cd69;
         }
 
-        /* 输入框区域 */
+        /* 输入区域 */
         #input-area {
-            background: #000;
-            border-top: 1px solid var(--term-border);
-            padding: 10px;
+            padding: 15px;
+            border-top: 1px solid var(--border-color);
+            background: var(--bg-color);
         }
-        
-        .cmd-line {
+        .input-box {
+            position: relative;
+            background: var(--vscode-input-background);
+            border: 1px solid var(--vscode-input-border);
+            border-radius: 4px;
+            padding: 8px;
             display: flex;
-            align-items: flex-start;
-            border: 1px solid var(--term-gray);
-            background: #111;
-            padding: 5px;
+            flex-direction: column;
+        }
+        .input-box:focus-within {
+            border-color: var(--vscode-focusBorder);
         }
         
-        .prompt-char {
-            color: var(--term-ai);
-            margin-right: 8px;
-            font-weight: bold;
-            padding-top: 2px;
-            user-select: none;
-        }
-
         textarea {
-            flex: 1;
             background: transparent;
             border: none;
-            color: #fff;
-            font-family: var(--font-mono);
+            color: var(--text-color);
+            font-family: inherit;
             font-size: 13px;
             resize: none;
             outline: none;
-            min-height: 20px;
+            min-height: 24px;
+            max-height: 200px;
+        }
+
+        .input-footer {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-top: 6px;
+            font-size: 10px;
+            color: #666;
         }
         
-        .status-bar {
-            font-size: 10px;
-            color: var(--term-gray);
-            margin-top: 4px;
-            text-align: right;
+        .key-hint span {
+            background: #333;
+            padding: 2px 4px;
+            border-radius: 3px;
+            color: #ccc;
         }
 
     </style>
 </head>
 <body>
-    <div id="terminal-output">
-        <div class="msg-block">
-            <div style="color: var(--term-ai)">
-                Opengravity OS v1.0<br>
-                [SYSTEM] Ready for input...
+    <div id="chat-container">
+        <div class="message msg-ai">
+            <div class="label">🤖 TARS</div>
+            <div class="markdown-body">
+                Ready. 设定参数确认：Option+Enter 发送。<br>
+                请输入指令...
             </div>
         </div>
     </div>
 
     <div id="input-area">
-        <div class="cmd-line">
-            <span class="prompt-char">>></span>
-            <textarea id="user-input" rows="1" placeholder="Enter instructions..."></textarea>
+        <div class="input-box">
+            <textarea id="prompt-input" placeholder="Ask TARS anything... (-help for commands)" rows="1"></textarea>
+            <div class="input-footer">
+                <div class="key-hint"><span>⌥ Option</span> + <span>Enter</span> to send</div>
+            </div>
         </div>
-        <div class="status-bar">CTRL+ENTER to SEND</div>
     </div>
 
     <script>
         const vscode = acquireVsCodeApi();
-        const outputDiv = document.getElementById('terminal-output');
-        const inputField = document.getElementById('user-input');
+        const chatContainer = document.getElementById('chat-container');
+        const inputField = document.getElementById('prompt-input');
 
+        // 自动增高输入框
         inputField.addEventListener('input', function() {
             this.style.height = 'auto';
-            this.style.height = (this.scrollHeight) + 'px';
+            this.style.height = this.scrollHeight + 'px';
         });
 
+        // 监听按键：Option(Alt) + Enter 发送
         inputField.addEventListener('keydown', (e) => {
-            if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
-                const text = inputField.value.trim();
-                if (!text) return;
-                appendUserMessage(text);
-                vscode.postMessage({ type: 'userInput', value: text });
-                inputField.value = '';
-                inputField.style.height = 'auto';
+            if (e.key === 'Enter' && e.altKey) {
+                e.preventDefault();
+                sendMessage();
             }
         });
 
+        function sendMessage() {
+            const text = inputField.value.trim();
+            if (!text) return;
+
+            appendUserMessage(text);
+            vscode.postMessage({ type: 'userInput', value: text });
+            
+            inputField.value = '';
+            inputField.style.height = 'auto';
+        }
+
         function appendUserMessage(text) {
             const div = document.createElement('div');
-            div.className = 'msg-block msg-user';
+            div.className = 'message msg-user';
             div.innerHTML = \`
-                <div class="role-label">USER</div>
-                <div class="content">\${text}</div>
+                <div class="label">YOU</div>
+                <div class="bubble">\${text}</div>
             \`;
-            outputDiv.appendChild(div);
+            chatContainer.appendChild(div);
             scrollToBottom();
         }
 
-        let activeReasoningElem = null;
-        let activeContentElem = null;
-        let activeFullText = "";
+        // 当前活动的 AI 响应组件
+        let currentThought = null;
+        let currentContent = null;
+        let mdBuffer = "";
 
         window.addEventListener('message', event => {
             const msg = event.data;
 
             if (msg.type === 'streamStart') {
-                const wrapper = document.createElement('div');
-                wrapper.className = 'msg-block msg-ai';
-                wrapper.innerHTML = \`
-                    <div class="role-label">GRAVITY</div>
-                    <div class="reasoning-box">
-                        <div class="reasoning-header">// THOUGHT STREAM</div>
-                        <div class="reasoning-content"></div>
-                    </div>
-                    <div class="content"></div>
+                const div = document.createElement('div');
+                div.className = 'message msg-ai';
+                div.innerHTML = \`
+                    <div class="label">🤖 TARS</div>
+                    <div class="thought-process"></div>
+                    <div class="markdown-body"></div>
                 \`;
-                outputDiv.appendChild(wrapper);
-                activeReasoningElem = wrapper.querySelector('.reasoning-content');
-                activeContentElem = wrapper.querySelector('.content');
-                activeFullText = "";
+                chatContainer.appendChild(div);
+                
+                currentThought = div.querySelector('.thought-process');
+                currentContent = div.querySelector('.markdown-body');
+                mdBuffer = "";
                 scrollToBottom();
             }
             else if (msg.type === 'streamUpdate') {
                 if (msg.dataType === 'reasoning') {
-                    activeReasoningElem.parentElement.style.display = 'block';
-                    activeReasoningElem.textContent += msg.value;
+                    if (!currentThought.classList.contains('active')) {
+                        currentThought.classList.add('active');
+                    }
+                    currentThought.textContent += msg.value;
                 } else {
-                    activeFullText += msg.value;
-                    activeContentElem.innerHTML = marked.parse(activeFullText);
+                    mdBuffer += msg.value;
+                    currentContent.innerHTML = marked.parse(mdBuffer);
                 }
                 scrollToBottom();
             }
             else if (msg.type === 'streamEnd') {
-                activeReasoningElem = null;
-                activeContentElem = null;
-                activeFullText = "";
+                currentThought = null;
+                currentContent = null;
+                mdBuffer = "";
             }
             else if (msg.type === 'restoreHistory') {
-                outputDiv.innerHTML = ''; 
+                // 简单恢复历史记录
+                chatContainer.innerHTML = '';
                 msg.value.forEach(m => {
-                    if (m.role === 'user') {
-                        appendUserMessage(m.content);
-                    } else {
+                    if (m.role === 'user') appendUserMessage(m.content);
+                    else {
                         const div = document.createElement('div');
-                        div.className = 'msg-block msg-ai';
+                        div.className = 'message msg-ai';
                         div.innerHTML = \`
-                            <div class="role-label">GRAVITY</div>
-                            <div class="content">\${marked.parse(m.content)}</div>
+                            <div class="label">🤖 TARS</div>
+                            <div class="markdown-body">\${marked.parse(m.content)}</div>
                         \`;
-                        outputDiv.appendChild(div);
+                        chatContainer.appendChild(div);
                     }
                 });
-                scrollToBottom();
             }
             else if (msg.type === 'error') {
                 const div = document.createElement('div');
-                div.className = 'msg-block msg-error';
-                div.textContent = msg.value;
-                outputDiv.appendChild(div);
+                div.className = 'message msg-ai';
+                div.innerHTML = \`<div class="label" style="color:red">⚠️ SYSTEM ERROR</div><div>\${msg.value}</div>\`;
+                chatContainer.appendChild(div);
             }
         });
 
         function scrollToBottom() {
-            outputDiv.scrollTop = outputDiv.scrollHeight;
+            chatContainer.scrollTop = chatContainer.scrollHeight;
         }
     </script>
 </body>
