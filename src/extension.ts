@@ -1,25 +1,18 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
-// 导入新写的侧边栏 Provider
 import { ChatViewProvider } from './chatViewProvider';
-// 导入 AI 引擎逻辑
-import { AIProvider, DeepSeekProvider, GeminiProvider } from './provider';
+import { AIProvider, DeepSeekProvider, GeminiProvider, ApiMessage } from './provider';
+import { loadSystemPrompt } from './utils/promptLoader';
 
-// --- 核心功能：工作区初始化 ---
 async function initializeWorkspace() {
-    // 1. 获取当前打开的文件夹
     const workspaceFolders = vscode.workspace.workspaceFolders;
-    if (!workspaceFolders) {
-        return; // 没有打开文件夹，不做任何事
-    }
+    if (!workspaceFolders) return;
 
     const rootPath = workspaceFolders[0].uri.fsPath;
     const configDir = path.join(rootPath, '.opengravity');
 
-    // 2. 检查 .opengravity 是否存在
     if (!fs.existsSync(configDir)) {
-        // 如果不存在，说明这是一个新环境，询问用户是否初始化
         const selection = await vscode.window.showInformationMessage(
             'Opengravity: Detected a new workspace. Initialize folder structure?',
             'Initialize', 'Ignore'
@@ -27,38 +20,17 @@ async function initializeWorkspace() {
 
         if (selection === 'Initialize') {
             try {
-                // 3. 创建核心文件夹结构
-                const folders = [
-                    '.opengravity',
-                    'daily',
-                    'codes',
-                    'notes',
-                    'todo',
-                    'brainstorm',
-                    'reviews'
-                ];
-
+                const folders = ['.opengravity','daily','codes','notes','todo','brainstorm','reviews'];
                 folders.forEach(folder => {
                     const folderPath = path.join(rootPath, folder);
-                    if (!fs.existsSync(folderPath)) {
-                        fs.mkdirSync(folderPath, { recursive: true });
-                    }
+                    if (!fs.existsSync(folderPath)) fs.mkdirSync(folderPath, { recursive: true });
                 });
 
-                // 4. 创建默认的 SYSTEM.md
                 const systemPromptPath = path.join(configDir, 'SYSTEM.md');
                 if (!fs.existsSync(systemPromptPath)) {
-                    const defaultPrompt = 
-`# SYSTEM PROMPT: Opengravity
-
-You are Opengravity, an AI-Native DevOS assistant integrated into VSCodium.
-- **Language**: Respond in Chinese (Simplified).
-- **Style**: Professional, concise, and helpful.
-- **Role**: Help the user with code reviews, brainstorming, and daily planning.
-`;
+                    const defaultPrompt = `# SYSTEM PROMPT: Opengravity\n\nYou are Opengravity, an AI-Native DevOS assistant.\n- **Language**: Respond in Chinese.\n`;
                     fs.writeFileSync(systemPromptPath, defaultPrompt);
                 }
-
                 vscode.window.showInformationMessage('Opengravity workspace initialized! 🚀');
             } catch (error: any) {
                 vscode.window.showErrorMessage(`Initialization failed: ${error.message}`);
@@ -68,54 +40,29 @@ You are Opengravity, an AI-Native DevOS assistant integrated into VSCodium.
 }
 
 export function activate(context: vscode.ExtensionContext) {
-    console.log('[CHECK]Opengravity is now active!');
-
-    // --- 1. 启动时检查初始化 ---
     initializeWorkspace();
 
-    /**
-     * 辅助函数：统一从配置中获取当前的 AI 引擎实例
-     */
     const getAIProvider = (): AIProvider | null => {
         const config = vscode.workspace.getConfiguration('opengravity');
         const providerType = config.get<string>('provider', 'deepseek');
         const apiKey = config.get<string>('apiKey');
-
-        if (!apiKey) {
-            return null;
-        }
-
-        return providerType === 'gemini' 
-            ? new GeminiProvider(apiKey) 
-            : new DeepSeekProvider(apiKey);
+        if (!apiKey) return null;
+        return providerType === 'gemini' ? new GeminiProvider(apiKey) : new DeepSeekProvider(apiKey);
     };
 
-    // --- 2. 注册侧边栏聊天视图 ---
     const sidebarProvider = new ChatViewProvider(context.extensionUri, getAIProvider);
-    
-    context.subscriptions.push(
-        vscode.window.registerWebviewViewProvider(
-            ChatViewProvider.viewType, 
-            sidebarProvider
-        )
-    );
+    context.subscriptions.push(vscode.window.registerWebviewViewProvider(ChatViewProvider.viewType, sidebarProvider));
 
-    // --- 3. 修复并保留 opengravity.ask 命令 (适配流式接口) ---
+    // --- 【修正后的 opengravity.ask 命令】 ---
     let askCommand = vscode.commands.registerCommand('opengravity.ask', async () => {
         const provider = getAIProvider();
-
         if (!provider) {
-            vscode.window.showErrorMessage('暂未配置API key,请在settings中搜索Opengravity.|API Key is not configured. Please set it in your settings.');
+            vscode.window.showErrorMessage('请先在配置中填写 API Key。');
             return;
         }
 
-        const userInput = await vscode.window.showInputBox({
-            prompt: "Ask Opengravity anything..."
-        });
-
-        if (!userInput) {
-            return;
-        }
+        const userInput = await vscode.window.showInputBox({ prompt: "Ask Opengravity anything..." });
+        if (!userInput) return;
 
         await vscode.window.withProgress({
             location: vscode.ProgressLocation.Notification,
@@ -123,26 +70,24 @@ export function activate(context: vscode.ExtensionContext) {
             cancellable: true
         }, async () => {
             try {
-                // 因为 ask 命令是显示在一个新文件里，我们需要把流式的内容积攒起来
-                let fullContent = "";
+                const systemPrompt = await loadSystemPrompt();
                 
+                // 【修正】构造 ApiMessage 数组，将 string 包装进去
+                const messages: ApiMessage[] = [
+                    { role: 'system', content: systemPrompt },
+                    { role: 'user', content: userInput }
+                ];
+
+                let fullContent = "";
                 await provider.generateContentStream(
-                    userInput, 
+                    messages, // 👈 传数组，不再传字符串
                     (update) => {
-                        // 过滤掉思考过程，只保留正文
-                        if (update.type === 'content') {
-                            fullContent += update.delta;
-                        }
+                        if (update.type === 'content') fullContent += update.delta;
                     }
-                    // 这里可以传 systemPrompt，暂时省略或设为 undefined
                 );
 
-                const doc = await vscode.workspace.openTextDocument({
-                    content: fullContent,
-                    language: 'markdown'
-                });
+                const doc = await vscode.workspace.openTextDocument({ content: fullContent, language: 'markdown' });
                 await vscode.window.showTextDocument(doc, vscode.ViewColumn.Beside);
-
             } catch (error: any) {
                 vscode.window.showErrorMessage(`AI Error: ${error.message}`);
             }
