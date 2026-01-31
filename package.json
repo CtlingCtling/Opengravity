@@ -44,12 +44,12 @@
           "type": "string",
           "enum": ["deepseek", "gemini"],
           "default": "deepseek",
-          "description": "选择大语言模型 | choose the provider."
+          "description": "[🤖]选择大语言模型 | choose the provider."
         },
         "opengravity.apiKey": {
           "type": "string",
           "default": "",
-          "description": "API密钥 请妥善保管 | your API key, KEEP_IT_SAFE."
+          "description": "[🔑]API密钥 请妥善保管 | your API key, KEEP_IT_SAFE."
         }
       }
     }

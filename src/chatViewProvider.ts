@@ -8,9 +8,11 @@ import * as path from 'path';
 
 import { AIProvider, ApiMessage } from './provider';
 import { loadSystemPrompt } from './utils/promptLoader';
+
 /**
  * import { OPGV_TOOLS } from './tools/definitions';
  */
+
 import { ToolExecutor } from './tools/executor';
 
 /**
@@ -25,6 +27,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
      * [context] 大模型上下文
      * 
      */
+    
     private _apiMessages: ApiMessage[] = [];
 
     constructor(
