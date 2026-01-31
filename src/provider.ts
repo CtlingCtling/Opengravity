@@ -1,6 +1,5 @@
 import OpenAI from "openai";
-// 【重要】导入你定义的工具说明书，确保路径正确
-import { TARS_TOOLS } from "./tools/definitions"; 
+import { OPGV_TOOLS } from "./tools/definitions"; 
 
 export interface StreamUpdate {
     type: 'reasoning' | 'content';
@@ -12,8 +11,8 @@ export interface ApiMessage {
     role: 'user' | 'assistant' | 'system' | 'tool'; 
     content: string;
     reasoning_content?: string; 
-    tool_calls?: any[];      // 模型生成的工具调用指令
-    tool_call_id?: string;   // 工具回复时关联的 ID
+    tool_calls?: any[];
+    tool_call_id?: string;
 }
 
 export interface AIProvider {
@@ -52,7 +51,7 @@ export class DeepSeekProvider implements AIProvider {
                 model: "deepseek-reasoner",
                 messages: cleanedMessages as any,
                 stream: true,
-                tools: TARS_TOOLS as any, // 👈 必须开启工具调用
+                tools: OPGV_TOOLS as any, // 👈 必须开启工具调用
                 tool_choice: "auto"
             });
 
@@ -64,8 +63,10 @@ export class DeepSeekProvider implements AIProvider {
 
             for await (const chunk of stream) {
                 const delta = chunk.choices[0]?.delta;
-                if (!delta) continue;
-
+                if (!delta) {
+                    continue;
+                }
+                
                 // A. 处理思维链 (Reasoning)
                 const reasoning = (delta as any).reasoning_content;
                 if (reasoning) {
@@ -82,8 +83,9 @@ export class DeepSeekProvider implements AIProvider {
                 // C. 处理工具调用碎片 (Tool Calls)
                 if (delta.tool_calls) {
                     for (const tc of delta.tool_calls) {
-                        if (tc.index === undefined) continue;
-                        
+                        if (tc.index === undefined) {
+                            continue;
+                        }
                         // 初始化该索引的工具对象
                         if (!toolCallsBuffer[tc.index]) {
                             toolCallsBuffer[tc.index] = {
@@ -110,7 +112,7 @@ export class DeepSeekProvider implements AIProvider {
             };
 
         } catch (error: any) {
-            const errorText = `[API Error]: ${error.message}`;
+            const errorText = `[❌]API Error: ${error.message}`;
             onUpdate({ type: 'content', delta: errorText });
             return { role: 'assistant', content: errorText };
         }

@@ -1,8 +1,8 @@
 /**
- * definitions.ts - TARS 工具箱的说明书
+ * definitions.ts - Opengravity 工具箱的说明书
  */
 
-export const TARS_TOOLS = [
+export const OPGV_TOOLS = [
     {
         type: "function",
         function: {
@@ -11,12 +11,12 @@ export const TARS_TOOLS = [
             parameters: {
                 type: "object",
                 properties: {
-                    path: { type: "string", description: "文件的相对路径，例如 'src/main.cpp' 或 'notes/idea.md'" }
+                    path: { type: "string", description: "文件的相对路径，例如 'notes/idea.md'" }
                 },
                 required: ["path"],
                 additionalProperties: false
             },
-            strict: true // 开启 DeepSeek Beta 的严格模式
+            strict: true
         }
     },
     {
