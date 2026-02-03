@@ -60,11 +60,13 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
             return;
         }
 
+        // 1. 初始化
         if (this._apiMessages.length === 0) {
             const sys = await loadSystemPrompt();
             this._apiMessages.push({ role: 'system', content: sys });
         }
 
+        // 2. 只有真正的用户手动输入才记录 user 消息
         if (content && !isToolResponse) {
             this._apiMessages.push({ role: 'user', content });
             this.saveSessionToDisk();
@@ -74,28 +76,64 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
             this._view.webview.postMessage({ type: 'streamStart' });
             const mcpTools = await this._mcpHost.getToolsForAI();
 
+            // 3. 调用 AI 引擎 (注意：provider.ts 里的逻辑也必须按我上一条说的改，否则依然报400)
             const aiResponse = await provider.generateContentStream(
                 this._apiMessages, 
                 (update) => {
-                    this._view?.webview.postMessage({ type: 'streamUpdate', dataType: update.type, value: update.delta });
+                    this._view?.webview.postMessage({ 
+                        type: 'streamUpdate', 
+                        dataType: update.type, 
+                        value: update.delta 
+                    });
                 },
                 mcpTools
             );
 
+            // 4. 存入 AI 的这次回复（含推理和工具指令）
             this._apiMessages.push(aiResponse);
             this._view.webview.postMessage({ type: 'streamEnd' });
             this.saveSessionToDisk();
 
-            // --- 处理工具调用并回环 ---
+            // 5. 【核心修复】自动化处理工具调用闭环
             if (aiResponse.tool_calls && aiResponse.tool_calls.length > 0) {
+                
+                // UI 提示
+                this._view.webview.postMessage({ 
+                    type: 'streamUpdate', 
+                    dataType: 'content', 
+                    value: `\n\n> 🔧 **TARS Action:** Executing ${aiResponse.tool_calls.length} tools...\n` 
+                });
+
+                // a. 依次执行所有工具，但不在这里触发递归
                 for (const toolCall of aiResponse.tool_calls) {
-                    const result = await this._mcpHost.executeTool(toolCall.function.name, JSON.parse(toolCall.function.arguments));
-                    this._apiMessages.push({ role: 'tool', tool_call_id: toolCall.id, content: result });
+                    let result = "";
+                    try {
+                        const funcName = toolCall.function.name;
+                        const args = JSON.parse(toolCall.function.arguments);
+                        result = await this._mcpHost.executeTool(funcName, args);
+                    } catch (e: any) {
+                        result = `[Tool Error]: ${e.message}`;
+                    }
+
+                    // b. 将结果作为 'tool' 角色存入记忆
+                    this._apiMessages.push({
+                        role: 'tool',
+                        tool_call_id: toolCall.id,
+                        content: result
+                    });
                 }
-                // 递归：让 AI 看到结果后继续说话
+
+                // c. 所有工具跑完了，存档
+                this.saveSessionToDisk();
+
+                // d. 【关键点】只在这里触发一次自动递归！
+                // 告诉 TARS：“工具结果都在上面了，根据这些信息继续你的回答。”
+                console.log("[OPGV] All tools done. Auto-resuming...");
                 await this.handleUserMessage("", true);
             }
-        } catch (err: any) { this._view.webview.postMessage({ type: 'error', value: err.message }); }
+        } catch (err: any) { 
+            this._view.webview.postMessage({ type: 'error', value: err.message }); 
+        }
     }
 
     private async handleLinkActiveFile() {

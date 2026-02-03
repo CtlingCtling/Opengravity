@@ -21,13 +21,26 @@ export class DeepSeekProvider implements AIProvider {
 
     async generateContentStream(messages: ApiMessage[], onUpdate: (update: StreamUpdate) => void, tools?: any[]): Promise<ApiMessage> {
         try {
-            const cleaned = messages.map(m => ({
-                role: m.role, content: m.content, tool_calls: m.tool_calls, tool_call_id: m.tool_call_id
-            }));
+            const cleanedMessages = messages.map(m => {
+                const msg: any = { role: m.role, content: m.content };
+            
+            // 如果这条消息有工具调用，必须把它的思考过程和工具指令一起传回去！
+                if (m.tool_calls) {
+                    msg.tool_calls = m.tool_calls;
+                    msg.reasoning_content = m.reasoning_content; // 👈 关键：保留这个
+                }
+            
+            // 如果是工具的结果消息，必须带上 ID
+                if (m.tool_call_id) {
+                    msg.tool_call_id = m.tool_call_id;
+                }
+            
+                return msg;
+            });
 
             const stream = await this.openai.chat.completions.create({
                 model: "deepseek-reasoner",
-                messages: cleaned as any,
+                messages: cleanedMessages as any,
                 stream: true,
                 tools: tools && tools.length > 0 ? tools : undefined,
                 tool_choice: "auto",
