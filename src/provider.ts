@@ -44,7 +44,7 @@ export class DeepSeekProvider implements AIProvider {
                 stream: true,
                 tools: tools && tools.length > 0 ? tools : undefined,
                 tool_choice: "auto",
-                max_tokens: 8000 // 防止截断
+                max_tokens: 65000 // 防止截断
             });
 
             let fullContent = "", fullReasoning = "", toolCallsBuffer: any[] = [];

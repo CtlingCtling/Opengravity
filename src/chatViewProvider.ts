@@ -4,6 +4,8 @@ import * as path from 'path';
 import { AIProvider, ApiMessage } from './provider';
 import { loadSystemPrompt } from './utils/promptLoader';
 import { McpHost } from './mcp/mcpHost';
+import { ToolExecutor } from './tools/executor';
+import { OPGV_TOOLS } from './tools/definitions';
 
 export class ChatViewProvider implements vscode.WebviewViewProvider {
     public static readonly viewType = 'opengravity.chatView';
@@ -13,7 +15,8 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     constructor(
         private readonly _extensionUri: vscode.Uri,
         private readonly _getAIProvider: () => AIProvider | null,
-        private readonly _mcpHost: McpHost
+        private readonly _mcpHost: McpHost,
+        private readonly _systemPrompt: string
     ) {}
 
     public resolveWebviewView(webviewView: vscode.WebviewView) {
@@ -26,7 +29,9 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         webviewView.webview.onDidReceiveMessage(async (data) => {
             switch (data.type) {
                 case 'webviewLoaded':
-                    if (this._apiMessages.length > 0) this.restoreUIHistory();
+                    if (this._apiMessages.length > 0) {
+                        webviewView.webview.postMessage({ type: 'restoreHistory', value: this._apiMessages });
+                    }
                     break;
                 case 'userInput':
                     await this.handleUserMessage(data.value);
@@ -48,6 +53,8 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
                     const t = vscode.window.activeTerminal || vscode.window.createTerminal("TARS");
                     t.show(); t.sendText(data.value);
                     break;
+                case 'fillInput':
+                    break;
             }
         });
     }
@@ -62,8 +69,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 
         // 1. 初始化
         if (this._apiMessages.length === 0) {
-            const sys = await loadSystemPrompt();
-            this._apiMessages.push({ role: 'system', content: sys });
+            this._apiMessages.push({ role: 'system', content: this._systemPrompt });
         }
 
         // 2. 只有真正的用户手动输入才记录 user 消息
@@ -75,6 +81,8 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         try {
             this._view.webview.postMessage({ type: 'streamStart' });
             const mcpTools = await this._mcpHost.getToolsForAI();
+            const opgvTools = OPGV_TOOLS;
+            const allTools = [...mcpTools, ...opgvTools];
 
             // 3. 调用 AI 引擎 (注意：provider.ts 里的逻辑也必须按我上一条说的改，否则依然报400)
             const aiResponse = await provider.generateContentStream(
@@ -86,7 +94,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
                         value: update.delta 
                     });
                 },
-                mcpTools
+                allTools
             );
 
             // 4. 存入 AI 的这次回复（含推理和工具指令）
@@ -107,15 +115,17 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
                 // a. 依次执行所有工具，但不在这里触发递归
                 for (const toolCall of aiResponse.tool_calls) {
                     let result = "";
-                    try {
-                        const funcName = toolCall.function.name;
-                        const args = JSON.parse(toolCall.function.arguments);
+                    const funcName = toolCall.function.name;
+                    const args = JSON.parse(toolCall.function.arguments);
+                    if (funcName === 'read_file') {
+                        result = await ToolExecutor.read_file(args);
+                    } else if (funcName === 'write_file') {
+                        result = await ToolExecutor.write_file(args);
+                    } else if (funcName === 'run_command') {
+                        result = await ToolExecutor.run_command(args);
+                    } else {
                         result = await this._mcpHost.executeTool(funcName, args);
-                    } catch (e: any) {
-                        result = `[Tool Error]: ${e.message}`;
                     }
-
-                    // b. 将结果作为 'tool' 角色存入记忆
                     this._apiMessages.push({
                         role: 'tool',
                         tool_call_id: toolCall.id,
@@ -227,37 +237,50 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         const vscode = acquireVsCodeApi();
         const chatBox = document.getElementById('chat-box');
         const input = document.getElementById('input');
+
         function linkFile() { vscode.postMessage({ type: 'linkActiveFile' }); }
         function saveClear() { vscode.postMessage({ type: 'saveAndClear' }); }
-        const renderer = new marked.Renderer();
-        renderer.code = (code, lang) => {
-            const escaped = code.replace(/'/g, "\\'").replace(/"/g, '&quot;');
-            return \`<div class="code-container"><div class="code-header">
-                <div class="action-link" onclick="vscode.postMessage({type:'insertCode', value:'\${escaped}'})">[INSERT]</div>
-                <div class="action-link" onclick="vscode.postMessage({type:'applyDiff', value:'\${escaped}'})">[DIFF_APPLY]</div>
-                <div class="action-link" onclick="vscode.postMessage({type:'runTerminal', value:'\${escaped}'})">[EXECUTE]</div>
-            </div><pre><code>\${code}</code></pre></div>\`;
-        };
-        marked.setOptions({ renderer: renderer });
+
+        document.addEventListener('click', e => {
+            const pre = e.target.closest('pre');
+            if (pre) {
+                const code = pre.innerText.replace("CLICK TO INSERT", "").trim();
+                vscode.postMessage({ type: 'insertCode', value: code });
+            }
+        });
+
+        input.addEventListener('input', function() {
+            this.style.height = 'auto';
+            this.style.height = this.scrollHeight + 'px';
+        });
+
         input.addEventListener('keydown', e => {
             if (e.key === 'Enter' && e.altKey) {
+                e.preventDefault();
+                input.style.height = 'auto';
                 const val = input.value.trim();
                 if (!val) return;
                 appendMsg('user', val);
                 vscode.postMessage({ type: 'userInput', value: val });
                 input.value = '';
+                input.style.height = 'auto';
             }
         });
-        let curRes = null, curCnt = null, mdBuf = "", curEof = null;
+
+        let curRes = null, curCnt = null, mdBuf = "";
+        let curEof = null;
+
         function appendMsg(role, text) {
             const div = document.createElement('div');
             div.className = 'msg ' + role;
-            div.innerHTML = \`<div style="font-weight:bold;margin-bottom:5px">[\${role.toUpperCase()}]</div><div class="reasoning"></div><div class="content"></div>\`;
+            const label = role === 'user' ? 'USER' : 'OPENGRAVITY';
+            div.innerHTML = \`<div style="font-weight:bold;margin-bottom:5px">[\${label}]</div><div class="reasoning"></div><div class="content"></div>\`;
             if (role === 'user') div.querySelector('.content').textContent = text;
             chatBox.appendChild(div);
             chatBox.scrollTop = chatBox.scrollHeight;
             return div;
         }
+
         window.addEventListener('message', event => {
             const msg = event.data;
             if (msg.type === 'streamStart') {
@@ -272,28 +295,50 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
                 chatBox.scrollTop = chatBox.scrollHeight;
             } else if (msg.type === 'streamEnd') {
                 if (curCnt) {
-        // 创建一个简单的文本节点或 span
                     const eofTag = document.createElement('span');
                     eofTag.textContent = ' [EOF]';
-        // 设置为灰色，符合 TUI 风格，不抢正文风头
                     eofTag.style.color = 'var(--gray)';
                     eofTag.style.fontWeight = 'bold';
                     eofTag.style.fontSize = '10px';
                     curCnt.appendChild(eofTag);
                 }
-                curRes = null; 
-                curCnt = null; 
-                mdBuf = "";
+                curRes = null; curCnt = null; mdBuf = "";
             } else if (msg.type === 'clearView') {
-                chatBox.innerHTML = '<div style="color:var(--ai-c)">[SYSTEM] Cache Cleared.</div>';
+                chatBox.innerHTML = '<div style="color:var(--ai-c)">[SYSTEM] Memory Purged. Archive Created.</div>';
             } else if (msg.type === 'restoreHistory') {
+                // 清空聊天记录区
                 chatBox.innerHTML = '';
+                
+                // 遍历并渲染历史
                 msg.value.forEach(m => {
-                    const div = appendMsg(m.role, m.content);
-                    if (m.role === 'ai') div.querySelector('.content').innerHTML = marked.parse(m.content);
+                    // 调用 appendMsg 来创建消息块
+                    const div = appendMsg(m.role === 'assistant' ? 'ai' : 'user', m.content);
+                    
+                    // 如果是 AI 消息，手动渲染 Markdown
+                    if (m.role === 'assistant') {
+                        div.querySelector('.content').innerHTML = marked.parse(m.content || '');
+                    } else {
+                        // 用户消息内容是纯文本
+                        div.querySelector('.content').textContent = m.content || '';
+                    }
+                    
+                    // 确保滚到底部
+                    chatBox.scrollTop = chatBox.scrollHeight;
                 });
+                
+                // 确保 curEof 变量清空，防止下次 streamStart 移除旧光标时出错
+                if (curEof) curEof.remove();
+                curEof = null;
+
             } else if (msg.type === 'fillInput') {
                 input.value = msg.value; input.focus();
+                input.style.height = 'auto';
+                input.style.height = input.scrollHeight + 'px';
+            } else if (msg.type === 'error') {
+                const div = document.createElement('div');
+                div.style.color = "red";
+                div.textContent = "[!] " + msg.value;
+                chatBox.appendChild(div);
             }
         });
         vscode.postMessage({ type: 'webviewLoaded' });
