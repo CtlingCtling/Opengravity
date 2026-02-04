@@ -1,5 +1,5 @@
 /**
- * definitions.ts - Opengravity 工具箱的说明书
+ * ## definitions.ts - Opengravity 工具的定义
  */
 
 export const OPGV_TOOLS = [

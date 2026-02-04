@@ -1,8 +1,31 @@
+
+/**
+ * ## mcpHost.ts - MCP host管理类
+ * #EXPLAINATION:
+ * - 连接MCP服务器
+ * - 获取MCP工具列表
+ * - 调用MCP工具
+ */
+
+/**
+ * ## imports
+ */
+
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+
+/**
+ * ## MCP配置接口
+ * #EXPLAINATION:
+ * - 从mcp_config.json中加载mcp配置
+ * - command: npx...
+ * - args: [...]
+ * - env: { KEY: VALUE }
+ * - 格式如下：
+ */
 
 interface McpConfig {
     mcpServers: {
@@ -14,17 +37,41 @@ interface McpConfig {
     };
 }
 
+/**
+ * ## McpHost Class
+ * #EXPLAINATION:
+ * private:
+ * - clients: Map<string, Client> 存储已连接的MCP客户端
+ * - isInitialized: boolean 标记是否已经配置MCP
+ * 
+ * public:
+ * - startup(): 初始化连接MCP服务器
+ * - getToolsForAI(): 获取所有MCP工具列表，供AI调用
+ * - executeTool(prefixedName: string, args: any): 调用指定MCP工具并返回结果
+ * 
+ * #USAGE:
+ * - 在extension.ts中实例化并启动McpHost
+ * - 通过McpHost获取工具列表并传递给AIProvider
+ * - 当AI需要调用工具时，通过McpHost执行工具调用
+ */
+
 export class McpHost {
     private clients: Map<string, Client> = new Map();
     private isInitialized = false;
 
     async startup() {
-        if (this.isInitialized) return;
+        if (this.isInitialized) {
+            return;
+        }
         const folders = vscode.workspace.workspaceFolders;
-        if (!folders) return;
+        if (!folders) {
+            return;
+        }
 
         const configPath = path.join(folders[0].uri.fsPath, '.opengravity', 'mcp_config.json');
-        if (!fs.existsSync(configPath)) return;
+        if (!fs.existsSync(configPath)) {
+            return;
+        }
 
         try {
             const configContent = fs.readFileSync(configPath, 'utf-8');
@@ -35,24 +82,24 @@ export class McpHost {
             }
             this.isInitialized = true;
         } catch (e: any) {
-            console.error(`[MCP] Config error: ${e.message}`);
+            console.error(`[❌] MCP Config error: ${e.message}`);
         }
     }
 
     private async connectServer(name: string, config: { command: string, args: string[], env?: any }) {
         try {
-            // 【核心修复】：清洗环境变量，剔除所有 undefined 的值
             const cleanEnv: Record<string, string> = {};
             Object.entries(process.env).forEach(([k, v]) => {
-                if (v !== undefined) cleanEnv[k] = v;
+                if (v !== undefined) {
+                    cleanEnv[k] = v;
+                }
             });
-            // 合并用户定义的 env
             const finalEnv = { ...cleanEnv, ...config.env };
 
             const transport = new StdioClientTransport({
                 command: config.command,
                 args: config.args,
-                env: finalEnv // 👈 现在这里全是 string 了
+                env: finalEnv
             });
 
             const client = new Client(
@@ -62,9 +109,9 @@ export class McpHost {
 
             await client.connect(transport);
             this.clients.set(name, client);
-            vscode.window.showInformationMessage(`[MCP] ${name} 已连接`);
+            vscode.window.showInformationMessage(`[✅] MCP: ${name} 已连接 | connected`);
         } catch (e) {
-            console.error(`[MCP] Connection error: ${name}`, e);
+            console.error(`[❌] MCP 连接出错 | Connection error: ${name}`, e);
         }
     }
 
@@ -89,20 +136,25 @@ export class McpHost {
 
     async executeTool(prefixedName: string, args: any): Promise<string> {
         const sep = prefixedName.indexOf("__");
-        if (sep === -1) return "Error: Invalid format.";
+        if (sep === -1) {
+            return "[❌] Error: 格式错误 | Invalid format.";
+        }
         const serverName = prefixedName.substring(0, sep);
         const toolName = prefixedName.substring(sep + 2);
         const client = this.clients.get(serverName);
-        if (!client) return `Error: Server ${serverName} inactive.`;
+        if (!client) {
+            return `[❌] Error: 服务器未连接 | Server ${serverName} inactive.`;
+        }
 
         const confirm = await vscode.window.showInformationMessage(
-            `TARS 执行工具: [${serverName}] ${toolName}`, "允许", "拒绝"
+            `[🔗] OPGV 执行工具 | OPGV using tool: [${serverName}] ${toolName}`, "ACPT", "RJCT"
         );
-        if (confirm !== "允许") return "User denied.";
-
+        if (confirm !== "RJCT") {
+            return "User denied.";
+        }
         try {
             const result = await client.callTool({ name: toolName, arguments: args });
             return JSON.stringify(result.content);
-        } catch (e: any) { return `Error: ${e.message}`; }
+        } catch (e: any) { return `[❌] Error: ${e.message}`; }
     }
 }

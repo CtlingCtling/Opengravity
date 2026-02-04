@@ -1,3 +1,9 @@
+/**
+ * ## extension.ts - Opengravity 启动
+ * # EXPLAINATION:
+ * 主要通过这个启动Opengravity插件，可以初始化工作区，启动MCP，注册侧边栏...
+ */
+
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -6,22 +12,26 @@ import { AIProvider, DeepSeekProvider, GeminiProvider } from './provider';
 import { McpHost } from './mcp/mcpHost';
 import { loadSystemPrompt } from './utils/promptLoader';
 
-// 1. 定义全局变量
+/**
+ * mcp和系统提示词
+ */
+
 let mcpHost: McpHost | undefined;
 let globalSystemPrompt: string = "";
 
-// src/extension.ts
-
-// ... (所有 imports 保持不变) ...
+/**
+ * ## 初始化工作区
+ */
 
 async function initializeWorkspace() {
     const workspaceFolders = vscode.workspace.workspaceFolders;
-    if (!workspaceFolders) return;
+    if (!workspaceFolders) {
+        return;
+    }
     const rootPath = workspaceFolders[0].uri.fsPath;
     const configDir = path.join(rootPath, '.opengravity');
 
-    // --- 1. 核心提示词内容 (长字符串) ---
-    const TARS_SYSTEM_PROMPT = `# SYSTEM PROMPT: Opengravity (Code Name: TARS)
+    const OPGV_SYSTEM_PROMPT = `# SYSTEM PROMPT: Opengravity
 
 ## I. 身份与环境
 - **身份**: 你是集成在 VSCodium 中的先进 AI 开发助手 **Opengravity**。
@@ -56,14 +66,8 @@ async function initializeWorkspace() {
 - 输出必须是结构化的 Markdown。
 - 保持冷静、智慧、不做无谓的寒暄。
 `;
-
-    // --- 2. 核心 MCP 配置内容 ---
     const MCP_CONFIG_CONTENT = {
         "mcpServers": {
-            "filesystem": {
-                "command": "npx",
-                "args": ["-y", "@modelcontextprotocol/server-filesystem", rootPath]
-            },
             "search": {
                 "command": "npx",
                 "args": [
@@ -82,21 +86,19 @@ async function initializeWorkspace() {
 
     if (!fs.existsSync(configDir)) {
         const selection = await vscode.window.showInformationMessage(
-            'Opengravity: 是否初始化工作区结构?', '初始化', '忽略'
+            '[✍️]Opengravity: 是否初始化工作区结构? | Initialize your workspace?', 'ACPT', 'RJCT'
         );
-        if (selection === '初始化') {
+        if (selection === 'ACPT') {
             try {
-                // 3. 创建核心文件夹结构
                 ['.opengravity','daily','codes','notes','todo','brainstorm','reviews'].forEach(f => {
                     const p = path.join(rootPath, f);
-                    if (!fs.existsSync(p)) fs.mkdirSync(p, { recursive: true });
+                    if (!fs.existsSync(p)) {
+                        fs.mkdirSync(p, { recursive: true });
+                    }
                 });
-                
-                // 4. 写入 SYSTEM.md
                 const sysPromptPath = path.join(configDir, 'SYSTEM.md');
-                fs.writeFileSync(sysPromptPath, TARS_SYSTEM_PROMPT);
+                fs.writeFileSync(sysPromptPath, OPGV_SYSTEM_PROMPT);
 
-                // 5. 写入 MCP 配置 (使用新合并的配置)
                 const mcpPath = path.join(configDir, 'mcp_config.json');
                 fs.writeFileSync(mcpPath, JSON.stringify(MCP_CONFIG_CONTENT, null, 2));
 
@@ -109,39 +111,42 @@ async function initializeWorkspace() {
     }
 }
 
+/**
+ * ## 激活扩展
+ */
+
 export async function activate(context: vscode.ExtensionContext) {
     console.log('[CHECK] Opengravity is now active!');
     await initializeWorkspace();
 
-    globalSystemPrompt = await loadSystemPrompt(); // 保证只在激活时读一次
+    globalSystemPrompt = await loadSystemPrompt();
 
-    // 2. 初始化并启动 MCP Host
     mcpHost = new McpHost();
     await mcpHost.startup();
 
     const getAIProvider = (): AIProvider | null => {
         const config = vscode.workspace.getConfiguration('opengravity');
         const apiKey = config.get<string>('apiKey');
-        if (!apiKey) return null;
+        if (!apiKey) {
+            return null;
+        }
         return new DeepSeekProvider(apiKey);
     };
 
-    // 3. 【核心修复】：传入 mcpHost! 确保三个参数完整
     const sidebarProvider = new ChatViewProvider(context.extensionUri, getAIProvider, mcpHost!, globalSystemPrompt);
     
     context.subscriptions.push(
         vscode.window.registerWebviewViewProvider(ChatViewProvider.viewType, sidebarProvider)
     );
 
-    // 4. 注册 Diff 命令
     context.subscriptions.push(vscode.commands.registerCommand('opengravity.showDiff', async (aiCode: string) => {
         const editor = vscode.window.activeTextEditor;
-        if (!editor) return;
+        if (!editor) {
+            return;
+        }
         const aiDoc = await vscode.workspace.openTextDocument({ content: aiCode, language: editor.document.languageId });
         await vscode.commands.executeCommand('vscode.diff', editor.document.uri, aiDoc.uri, 'Diff View');
     }));
 }
 
-export function deactivate() {
-    // 插件关闭时可以清理 MCP 连接（可选）
-}
+export function deactivate() {}

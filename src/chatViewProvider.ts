@@ -1,11 +1,44 @@
+/**
+ * ## chatViewProvider.ts - 提供聊天视图，交互界面...
+ * #EXPLAINATION:
+ * 定义 ChatViewProvider 类，创建和管理聊天窗口。
+ */
+
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
 import { AIProvider, ApiMessage } from './provider';
-import { loadSystemPrompt } from './utils/promptLoader';
 import { McpHost } from './mcp/mcpHost';
 import { ToolExecutor } from './tools/executor';
 import { OPGV_TOOLS } from './tools/definitions';
+
+/**
+ * ## ChatViewProvider Class
+ * #EXPALINATION:
+ * 创建和管理聊天窗口
+ * 
+ * private:
+ * - _view: Webview 视图实例
+ * - _apiMessages: 存储与 AI 交互的消息数组。(DeepSeekdocs里面要求的)
+ * 
+ *  构造函数参数:
+ * - _extensionUri: 扩展的 URI
+ * - _getAIProvider: 获取函数
+ * - _mcpHost: MCP 主机实例
+ * - _systemPrompt: 系统提示词
+ * 
+ * 
+ * public:
+ * - resolveWebviewView: 设置视图
+ * - handleUserMessage: 处理用户消息
+ * - handleLinkActiveFile: 链接当前活动文件
+ * - handleSaveAndClear: 保存和清除聊天记录
+ * - getHistoryPath: 获取历史记录文件路径
+ * - saveSessionToDisk: 将当前会话保存到磁盘
+ * - loadSessionFromDisk: 从磁盘加载会话历史
+ * - restoreUIHistory: 恢复历史记录
+ * - _getHtmlForWebview: HTML
+ */
 
 export class ChatViewProvider implements vscode.WebviewViewProvider {
     public static readonly viewType = 'opengravity.chatView';
@@ -44,7 +77,9 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
                     break;
                 case 'insertCode':
                     const editor = vscode.window.activeTextEditor;
-                    if (editor) editor.edit(b => b.insert(editor.selection.active, data.value));
+                    if (editor) {
+                        editor.edit(b => b.insert(editor.selection.active, data.value));
+                    }
                     break;
                 case 'applyDiff':
                     vscode.commands.executeCommand('opengravity.showDiff', data.value);
@@ -60,19 +95,19 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     }
 
     private async handleUserMessage(content: string, isToolResponse: boolean = false) {
-        if (!this._view) return;
+        if (!this._view) {
+            return;
+        }
         const provider = this._getAIProvider();
         if (!provider) {
             this._view.webview.postMessage({ type: 'error', value: 'API KEY MISSING' });
             return;
         }
 
-        // 1. 初始化
         if (this._apiMessages.length === 0) {
             this._apiMessages.push({ role: 'system', content: this._systemPrompt });
         }
 
-        // 2. 只有真正的用户手动输入才记录 user 消息
         if (content && !isToolResponse) {
             this._apiMessages.push({ role: 'user', content });
             this.saveSessionToDisk();
@@ -83,8 +118,6 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
             const mcpTools = await this._mcpHost.getToolsForAI();
             const opgvTools = OPGV_TOOLS;
             const allTools = [...mcpTools, ...opgvTools];
-
-            // 3. 调用 AI 引擎 (注意：provider.ts 里的逻辑也必须按我上一条说的改，否则依然报400)
             const aiResponse = await provider.generateContentStream(
                 this._apiMessages, 
                 (update) => {
@@ -97,22 +130,16 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
                 allTools
             );
 
-            // 4. 存入 AI 的这次回复（含推理和工具指令）
             this._apiMessages.push(aiResponse);
             this._view.webview.postMessage({ type: 'streamEnd' });
             this.saveSessionToDisk();
 
-            // 5. 【核心修复】自动化处理工具调用闭环
             if (aiResponse.tool_calls && aiResponse.tool_calls.length > 0) {
-                
-                // UI 提示
                 this._view.webview.postMessage({ 
                     type: 'streamUpdate', 
                     dataType: 'content', 
                     value: `\n\n> 🔧 **TARS Action:** Executing ${aiResponse.tool_calls.length} tools...\n` 
                 });
-
-                // a. 依次执行所有工具，但不在这里触发递归
                 for (const toolCall of aiResponse.tool_calls) {
                     let result = "";
                     const funcName = toolCall.function.name;
@@ -132,12 +159,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
                         content: result
                     });
                 }
-
-                // c. 所有工具跑完了，存档
                 this.saveSessionToDisk();
-
-                // d. 【关键点】只在这里触发一次自动递归！
-                // 告诉 TARS：“工具结果都在上面了，根据这些信息继续你的回答。”
                 console.log("[OPGV] All tools done. Auto-resuming...");
                 await this.handleUserMessage("", true);
             }
@@ -148,24 +170,36 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 
     private async handleLinkActiveFile() {
         const editor = vscode.window.activeTextEditor;
-        if (!editor) return;
+        if (!editor) {
+            return;
+        }
         const prompt = `[CONTEXT: \`${path.basename(editor.document.fileName)}\`]\n\`\`\`\n${editor.document.getText()}\n\`\`\`\n\n`;
         this._view?.webview.postMessage({ type: 'fillInput', value: prompt });
     }
 
     private async handleSaveAndClear() {
-        if (this._apiMessages.length <= 1) return;
+        if (this._apiMessages.length <= 1) {
+            return;
+        }
         const root = vscode.workspace.workspaceFolders?.[0].uri.fsPath;
-        if (!root) return;
+        if (!root) {
+            return;
+        }
         const savePath = path.join(root, 'reviews', `archive_${Date.now()}.md`);
         let output = "# Archive\n\n";
-        this._apiMessages.forEach(m => { if (m.content) output += `### [${m.role.toUpperCase()}]\n${m.content}\n\n---\n\n`; });
+        this._apiMessages.forEach(m => { 
+            if (m.content) {
+                output += `### [${m.role.toUpperCase()}]\n${m.content}\n\n---\n\n`; 
+            }
+        });
         try {
             fs.mkdirSync(path.dirname(savePath), { recursive: true });
             fs.writeFileSync(savePath, output, 'utf-8');
             this._apiMessages = [];
             const hp = this.getHistoryPath();
-            if (hp && fs.existsSync(hp)) fs.unlinkSync(hp);
+            if (hp && fs.existsSync(hp)) {
+                fs.unlinkSync(hp);
+            }
             this._view?.webview.postMessage({ type: 'clearView' });
         } catch (e: any) { vscode.window.showErrorMessage(e.message); }
     }
@@ -306,27 +340,16 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
             } else if (msg.type === 'clearView') {
                 chatBox.innerHTML = '<div style="color:var(--ai-c)">[SYSTEM] Memory Purged. Archive Created.</div>';
             } else if (msg.type === 'restoreHistory') {
-                // 清空聊天记录区
                 chatBox.innerHTML = '';
-                
-                // 遍历并渲染历史
                 msg.value.forEach(m => {
-                    // 调用 appendMsg 来创建消息块
                     const div = appendMsg(m.role === 'assistant' ? 'ai' : 'user', m.content);
-                    
-                    // 如果是 AI 消息，手动渲染 Markdown
                     if (m.role === 'assistant') {
                         div.querySelector('.content').innerHTML = marked.parse(m.content || '');
                     } else {
-                        // 用户消息内容是纯文本
                         div.querySelector('.content').textContent = m.content || '';
                     }
-                    
-                    // 确保滚到底部
                     chatBox.scrollTop = chatBox.scrollHeight;
                 });
-                
-                // 确保 curEof 变量清空，防止下次 streamStart 移除旧光标时出错
                 if (curEof) curEof.remove();
                 curEof = null;
 
