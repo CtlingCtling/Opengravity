@@ -2,9 +2,7 @@
 
 ## ⚠️ 非常重要！！！！
 
- Opengravity 灵感来源于 @bilibili/MarsLUL 的 OrbitOS (一个Obsidian的工作流生产力插件)
- https://github.com/MarsWang42/OrbitOS
- 绝对比 Opengravity 更稳定可靠
+ Opengravity 灵感来源于 @bilibili/MarsLUL 的 OrbitOS (一个Obsidian的工作流生产力插件)，绝对比 Opengravity 更稳定可靠
 
  Opengravity 是我做了给自己用的小插件，很多地方没有经过严谨的验证，肯定存在很多恶性的bug，我没有扎实的技术背景，大部分功能是和大模型聊天加上的
 如果你正在考虑把 Opengravity 放到自己的工作中，我劝你放弃，这是我的玩具，不是个合格的工具。
@@ -72,7 +70,7 @@ Opengravity 是一个在 VSCode 中大致模拟下一代 AI 助手的实验性�
 
 ## ⚠️ 已知不足与局限性
 
-- **Agent 性能瓶颈**：响应速度和稳定性受限于 DeepSeek API 的访问速度。(DeepSeek的AI味太冲了)
+- **Agent 性能瓶颈**：响应速度 and 稳定性受限于 DeepSeek API 的访问速度。(DeepSeek的AI味太冲了)
 - **Diff 局限**：目前的 Diff 功能仅为 **侧边栏对比**，未实现 Antigravity/Cursor 复杂的 **行内 Inline Diff** 替换功能。(我非常想要这个功能)
 - **错误处理**：有很多我不知道的错误(我随便用一下就报错了，非常难受)
 
