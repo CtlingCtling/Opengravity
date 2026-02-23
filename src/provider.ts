@@ -1,4 +1,5 @@
 import OpenAI from "openai";
+import { Logger } from './utils/logger';
 
 export interface StreamUpdate { type: 'reasoning' | 'content'; delta: string; }
 export interface ApiMessage {
@@ -15,6 +16,8 @@ export interface AIProvider {
 
 export class DeepSeekProvider implements AIProvider {
     private openai: OpenAI;
+    private static readonly MAX_TOKENS = 65000;
+
     constructor(apiKey: string) {
         this.openai = new OpenAI({ baseURL: 'https://api.deepseek.com/v1', apiKey });
     }
@@ -42,7 +45,7 @@ export class DeepSeekProvider implements AIProvider {
                 stream: true,
                 tools: tools && tools.length > 0 ? tools : undefined,
                 tool_choice: "auto",
-                max_tokens: 65000
+                max_tokens: DeepSeekProvider.MAX_TOKENS
             });
 
             let fullContent = "", fullReasoning = "", toolCallsBuffer: any[] = [];
@@ -69,8 +72,23 @@ export class DeepSeekProvider implements AIProvider {
                     }
                 }
             }
+            
+            // Validate tool call arguments after the stream has finished
+            for (const toolCall of toolCallsBuffer) {
+                if (toolCall.function?.arguments) {
+                    try {
+                        const parsedArgs = JSON.parse(toolCall.function.arguments);
+                        toolCall.function.arguments = JSON.stringify(parsedArgs); // Re-stringify to ensure clean JSON string
+                    } catch (jsonError: any) {
+                        Logger.error(`Error parsing tool call arguments for tool '${toolCall.function.name}'. Original arguments: ${toolCall.function.arguments}`, jsonError);
+                        toolCall.function.arguments = JSON.stringify({ error: `Invalid JSON arguments from AI: ${jsonError.message}` });
+                    }
+                }
+            }
+
             return { role: 'assistant', content: fullContent || null, reasoning_content: fullReasoning, tool_calls: toolCallsBuffer.length > 0 ? toolCallsBuffer : undefined };
         } catch (error: any) {
+            Logger.error(`API Error: ${error.message}`, error); // Log the API error
             onUpdate({ type: 'content', delta: `[API Error]: ${error.message}` });
             return { role: 'assistant', content: error.message };
         }

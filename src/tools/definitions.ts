@@ -51,5 +51,40 @@ export const OPGV_TOOLS = [
             },
             strict: true
         }
+    },
+    {
+        type: "function",
+        function: {
+            name: "get_mcp_prompt",
+            description: "获取特定 MCP 服务器注册的提示词模板的具体内容。当你想使用某种预设的角色或任务模板时调用此工具。",
+            parameters: {
+                type: "object",
+                properties: {
+                    server_name: { type: "string", description: "MCP 服务器名称" },
+                    prompt_name: { type: "string", description: "提示词模板名称" },
+                    arguments: { type: "object", description: "提示词模板所需的参数（键值对）", additionalProperties: { type: "string" } }
+                },
+                required: ["server_name", "prompt_name"],
+                additionalProperties: false
+            },
+            strict: true
+        }
+    },
+    {
+        type: "function",
+        function: {
+            name: "get_mcp_resource",
+            description: "获取特定 MCP 服务器注册的静态资源（如知识文件、API文档）的具体内容。",
+            parameters: {
+                type: "object",
+                properties: {
+                    server_name: { type: "string", description: "MCP 服务器名称" },
+                    uri: { type: "string", description: "资源的唯一 URI" }
+                },
+                required: ["server_name", "uri"],
+                additionalProperties: false
+            },
+            strict: true
+        }
     }
 ];

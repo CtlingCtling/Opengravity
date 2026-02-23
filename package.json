@@ -4,7 +4,7 @@
   "description": "An AI workflow platform.",
   "version": "0.0.1",
   "engines": {
-    "vscode": "^1.108.1"
+    "vscode": "^1.109.5"
   },
   "activationEvents": [
     "onView:opengravity.chatView",
@@ -42,7 +42,10 @@
       "properties": {
         "opengravity.provider": {
           "type": "string",
-          "enum": ["deepseek", "gemini"],
+          "enum": [
+            "deepseek",
+            "gemini"
+          ],
           "default": "deepseek",
           "description": "[🤖]选择大语言模型 | choose the provider."
         },
@@ -55,7 +58,10 @@
     }
   },
   "dependencies": {
-    "openai": "^6.17.0"
+    "@anthropic-ai/sdk": "^0.78.0",
+    "@modelcontextprotocol/sdk": "^1.26.0",
+    "openai": "^6.17.0",
+    "zod": "^3.25.76"
   },
   "scripts": {
     "vscode:prepublish": "npm run compile",
@@ -63,15 +69,19 @@
     "watch": "tsc -watch -p ./",
     "pretest": "npm run compile && npm run lint",
     "lint": "eslint src",
-    "test": "vscode-test"
+    "test": "vscode-test",
+    "test:unit": "jest"
   },
   "devDependencies": {
+    "@types/jest": "^29.5.11",
     "@types/mocha": "^10.0.10",
     "@types/node": "^25.1.0",
     "@types/vscode": "^1.108.1",
     "@vscode/test-cli": "^0.0.12",
     "@vscode/test-electron": "^2.5.2",
     "eslint": "^9.39.2",
+    "jest": "^29.7.0",
+    "ts-jest": "29.1.1",
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.52.0"
   }

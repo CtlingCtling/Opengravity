@@ -1,10 +1,10 @@
-
 /**
  * ## mcpHost.ts - MCP host管理类
  * #EXPLAINATION:
  * - 连接MCP服务器
- * - 获取MCP工具列表
- * - 调用MCP工具
+ * - 获取MCP工具、提示词和资源列表
+ * - 执行MCP工具调用
+ * - 读取MCP资源内容
  */
 
 /**
@@ -16,15 +16,18 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { 
+    CallToolResultSchema, 
+    ListToolsResultSchema, 
+    ListPromptsResultSchema, 
+    GetPromptResultSchema,
+    ListResourcesResultSchema,
+    ReadResourceResultSchema
+} from "@modelcontextprotocol/sdk/types.js";
+import { Logger } from '../utils/logger';
 
 /**
  * ## MCP配置接口
- * #EXPLAINATION:
- * - 从mcp_config.json中加载mcp配置
- * - command: npx...
- * - args: [...]
- * - env: { KEY: VALUE }
- * - 格式如下：
  */
 
 interface McpConfig {
@@ -37,44 +40,45 @@ interface McpConfig {
     };
 }
 
-/**
- * ## McpHost Class
- * #EXPLAINATION:
- * private:
- * - clients: Map<string, Client> 存储已连接的MCP客户端
- * - isInitialized: boolean 标记是否已经配置MCP
- * 
- * public:
- * - startup(): 初始化连接MCP服务器
- * - getToolsForAI(): 获取所有MCP工具列表，供AI调用
- * - executeTool(prefixedName: string, args: any): 调用指定MCP工具并返回结果
- * 
- * #USAGE:
- * - 在extension.ts中实例化并启动McpHost
- * - 通过McpHost获取工具列表并传递给AIProvider
- * - 当AI需要调用工具时，通过McpHost执行工具调用
- */
-
 export class McpHost {
     private clients: Map<string, Client> = new Map();
     private isInitialized = false;
 
+    private static readonly ALLOWED_MCP_COMMANDS = ['npx', 'node', 'uv', 'python', 'python3']; 
+    private static readonly SAFE_ARG_REGEX = /^[\w\s\-\.\/\=\\:]+$/; 
+
+    private validateMcpCommand(command: string, args: string[]): void {
+        if (!McpHost.ALLOWED_MCP_COMMANDS.includes(command)) {
+            throw new Error(`Unauthorized command: ${command}.`);
+        }
+        for (const arg of args) {
+            if (!McpHost.SAFE_ARG_REGEX.test(arg)) {
+                throw new Error(`Unsafe argument detected: '${arg}'.`);
+            }
+        }
+    }
+
+    async shutdown() {
+        for (const [name, client] of this.clients) {
+            try {
+                await client.close();
+                Logger.info(`[✅] MCP: ${name} 已断开 | disconnected`);
+            } catch (err: any) {
+                Logger.error(`[❌] MCP: Error disconnecting ${name}: ${err.message}`);
+            }
+        }
+    }
+
     async startup() {
-        if (this.isInitialized) {
-            return;
-        }
+        if (this.isInitialized) { return; }
         const folders = vscode.workspace.workspaceFolders;
-        if (!folders) {
-            return;
-        }
+        if (!folders) { return; }
 
         const configPath = path.join(folders[0].uri.fsPath, '.opengravity', 'mcp_config.json');
-        if (!fs.existsSync(configPath)) {
-            return;
-        }
-
+        
         try {
-            const configContent = fs.readFileSync(configPath, 'utf-8');
+            await fs.promises.access(configPath); 
+            const configContent = await fs.promises.readFile(configPath, 'utf-8');
             const config: McpConfig = JSON.parse(configContent);
 
             for (const [serverName, serverConfig] of Object.entries(config.mcpServers)) {
@@ -82,36 +86,42 @@ export class McpHost {
             }
             this.isInitialized = true;
         } catch (e: any) {
-            console.error(`[❌] MCP Config error: ${e.message}`);
+            if (e.code === 'ENOENT') {
+                Logger.info("MCP config file not found. Skipping MCP server startup.");
+            } else {
+                Logger.error(`MCP Config error: ${e.message}`, e);
+            }
         }
     }
 
     private async connectServer(name: string, config: { command: string, args: string[], env?: any }) {
+        this.validateMcpCommand(config.command, config.args);
         try {
-            const cleanEnv: Record<string, string> = {};
-            Object.entries(process.env).forEach(([k, v]) => {
-                if (v !== undefined) {
-                    cleanEnv[k] = v;
-                }
-            });
-            const finalEnv = { ...cleanEnv, ...config.env };
-
             const transport = new StdioClientTransport({
                 command: config.command,
                 args: config.args,
-                env: finalEnv
+                env: { ...process.env, ...(config.env || {}) }
             });
 
+            // [修正重构] 按照客户端规范声明能力
             const client = new Client(
                 { name: "Opengravity-Host", version: "1.0.0" },
-                { capabilities: {} }
+                { 
+                    capabilities: { 
+                        // 客户端能力通常包括 roots, sampling 等
+                        // 对于基础工具/提示词/资源调用，这里可以先留空
+                    } 
+                }
             );
 
             await client.connect(transport);
             this.clients.set(name, client);
             vscode.window.showInformationMessage(`[✅] MCP: ${name} 已连接 | connected`);
-        } catch (e) {
-            console.error(`[❌] MCP 连接出错 | Connection error: ${name}`, e);
+            
+            // [TODO] 捕获 stderr 并记录日志
+            // 注意：StdioClientTransport 内部管理进程，捕获 stderr 可能需要扩展 transport 层或使用 SDK 提供的 hook
+        } catch (e: any) {
+            Logger.error(`[❌] MCP 连接出错 | Connection error: ${name}`, e);
         }
     }
 
@@ -119,7 +129,7 @@ export class McpHost {
         const allTools: any[] = [];
         for (const [serverName, client] of this.clients) {
             try {
-                const result = await client.listTools();
+                const result = await client.request({ method: "tools/list" }, ListToolsResultSchema);
                 allTools.push(...result.tools.map(tool => ({
                     type: "function",
                     function: {
@@ -129,32 +139,115 @@ export class McpHost {
                         strict: true
                     }
                 })));
-            } catch (e) { console.error(e); }
+            } catch (e: any) {
+                Logger.error(`Failed to list tools from ${serverName}:`, e);
+            }
         }
         return allTools;
     }
 
+    async getPromptsForAI() {
+        const allPrompts: any[] = [];
+        for (const [serverName, client] of this.clients) {
+            try {
+                const result = await client.request({ method: "prompts/list" }, ListPromptsResultSchema);
+                allPrompts.push(...result.prompts.map(prompt => ({
+                    serverName,
+                    name: prompt.name,
+                    description: prompt.description || "",
+                    arguments: prompt.arguments || []
+                })));
+            } catch (e: any) {
+                Logger.error(`Failed to list prompts from ${serverName}:`, e);
+            }
+        }
+        return allPrompts;
+    }
+
+    async getResourcesForAI() {
+        const allResources: any[] = [];
+        for (const [serverName, client] of this.clients) {
+            try {
+                const result = await client.request({ method: "resources/list" }, ListResourcesResultSchema);
+                allResources.push(...result.resources.map(resource => ({
+                    serverName,
+                    name: resource.name,
+                    uri: resource.uri,
+                    description: resource.description || "",
+                    mimeType: resource.mimeType
+                })));
+            } catch (e: any) {
+                Logger.error(`Failed to list resources from ${serverName}:`, e);
+            }
+        }
+        return allResources;
+    }
+
+    async getPromptContent(serverName: string, promptName: string, args: any): Promise<string> {
+        const client = this.clients.get(serverName);
+        if (!client) { return `[❌] Error: 服务器 ${serverName} 未连接.`; }
+
+        try {
+            const result = await client.request({ 
+                method: "prompts/get", 
+                params: { name: promptName, arguments: args } 
+            }, GetPromptResultSchema);
+            
+            return result.messages.map(m => {
+                const text = m.content.type === 'text' ? m.content.text : '[Non-text content]';
+                return `[${m.role}] ${text}`;
+            }).join("\n---\n");
+        } catch (e: any) {
+            return `[❌] Error: ${e.message}`;
+        }
+    }
+
+    /**
+     * [URI重构] 使用标准的 URI 方式读取资源内容
+     */
+    async getResourceContent(serverName: string, resourceUri: string): Promise<string> {
+        const client = this.clients.get(serverName);
+        if (!client) { return `[❌] Error: 服务器 ${serverName} 未连接.`; }
+
+        try {
+            const result = await client.request({ 
+                method: "resources/read", 
+                params: { uri: resourceUri } 
+            }, ReadResourceResultSchema);
+            
+            return result.contents.map(c => {
+                if ('text' in c) { return c.text; }
+                return `[Binary Content: ${c.mimeType}]`;
+            }).join("\n---\n");
+        } catch (e: any) {
+            return `[❌] Error: ${e.message}`;
+        }
+    }
+
     async executeTool(prefixedName: string, args: any): Promise<string> {
         const sep = prefixedName.indexOf("__");
-        if (sep === -1) {
-            return "[❌] Error: 格式错误 | Invalid format.";
-        }
+        if (sep === -1) { return "[❌] Error: 格式错误.";}
+        
         const serverName = prefixedName.substring(0, sep);
         const toolName = prefixedName.substring(sep + 2);
         const client = this.clients.get(serverName);
-        if (!client) {
-            return `[❌] Error: 服务器未连接 | Server ${serverName} inactive.`;
-        }
+        
+        if (!client) { return `[❌] Error: 服务器 ${serverName} 未连接.`; }
 
         const confirm = await vscode.window.showInformationMessage(
-            `[🔗] OPGV 执行工具 | OPGV using tool: [${serverName}] ${toolName}`, "ACPT", "RJCT"
+            `[🔗] OPGV 执行工具: [${serverName}] ${toolName}`, "ACPT", "RJCT"
         );
-        if (confirm !== "RJCT") {
-            return "User denied.";
-        }
+        if (confirm !== "ACPT") { return "User denied."; }
+
         try {
-            const result = await client.callTool({ name: toolName, arguments: args });
+            const result = await client.request({ 
+                method: "tools/call", 
+                params: { name: toolName, arguments: args } 
+            }, CallToolResultSchema);
+            
             return JSON.stringify(result.content);
-        } catch (e: any) { return `[❌] Error: ${e.message}`; }
+        } catch (e: any) { 
+            return `[❌] Error: ${e.message}`; 
+        }
     }
 }
