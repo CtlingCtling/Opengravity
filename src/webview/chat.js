@@ -161,6 +161,13 @@ window.addEventListener('message', event => {
         case 'clearView':
             chatBoxComp.clear();
             break;
+        case 'aiResponse':
+            chatBoxComp.removeEof();
+            const responseObj = chatBoxComp.appendMessage('ai', '');
+            updateContent(responseObj.content, msg.value);
+            chatBoxComp.addEof(responseObj.content);
+            chatBoxComp.scrollToBottom();
+            break;
         case 'restoreHistory':
             chatBoxComp.reset();
             msg.value.forEach(m => {

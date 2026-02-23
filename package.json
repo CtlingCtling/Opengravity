@@ -61,6 +61,7 @@
     "@anthropic-ai/sdk": "^0.78.0",
     "@modelcontextprotocol/sdk": "^1.26.0",
     "openai": "^6.17.0",
+    "toml": "^3.0.0",
     "zod": "^3.25.76"
   },
   "scripts": {

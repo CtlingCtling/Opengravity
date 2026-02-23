@@ -6,6 +6,7 @@ import { McpHost } from './mcp/mcpHost';
 import { ToolExecutor } from './tools/executor';
 import { OPGV_TOOLS } from './tools/definitions';
 import { Logger } from './utils/logger';
+import { CommandDispatcher } from './commands/CommandDispatcher';
 
 export class ChatViewProvider implements vscode.WebviewViewProvider {
     public static readonly viewType = 'opengravity.chatView';
@@ -13,13 +14,16 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     private _apiMessages: ApiMessage[] = [];
     private _recursionDepth = 0;
     private static MAX_RECURSION_DEPTH = 5;
+    private _commandDispatcher: CommandDispatcher;
 
     constructor(
         private readonly _extensionUri: vscode.Uri,
         private readonly _getAIProvider: () => AIProvider | null,
         private readonly _mcpHost: McpHost,
         private readonly _systemPrompt: string
-    ) {}
+    ) {
+        this._commandDispatcher = new CommandDispatcher();
+    }
 
     public async resolveWebviewView(webviewView: vscode.WebviewView) {
         this._view = webviewView;
@@ -72,6 +76,31 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
             this._postWebviewMessage('error', 'API key missing');
             return;
         }
+
+        // --- 指令拦截钩子 ---
+        if (!isToolResponse && content) {
+            const dispatchResult = await this._commandDispatcher.dispatch(
+                content,
+                provider,
+                this._mcpHost,
+                this._view.webview,
+                this._extensionUri,
+                async (fakeMsg) => {
+                    // 用于注入合成消息的回调逻辑（TOML用）
+                    await this._storeUserMessage(fakeMsg);
+                    await this.handleUserMessage("", true);
+                }
+            );
+
+            // 如果指令已执行并被消费，则停止后续 AI 流
+            if (dispatchResult) {
+                if (dispatchResult.status === 'error') {
+                    this._postWebviewMessage('error', dispatchResult.message);
+                }
+                return;
+            }
+        }
+        // ------------------
 
         if (isToolResponse) {
             this._recursionDepth++;
