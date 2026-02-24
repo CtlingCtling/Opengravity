@@ -7,14 +7,20 @@ import { ToolExecutor } from './tools/executor';
 import { OPGV_TOOLS } from './tools/definitions';
 import { Logger } from './utils/logger';
 import { CommandDispatcher } from './commands/CommandDispatcher';
+import { HistoryManager } from './session/HistoryManager'; // 引入 HistoryManager
+import { ChatHistoryService } from './services/ChatHistoryService'; // 引入 ChatHistoryService
+import { DiffContentProvider } from './utils/diffProvider';
 
 export class ChatViewProvider implements vscode.WebviewViewProvider {
     public static readonly viewType = 'opengravity.chatView';
     private _view?: vscode.WebviewView;
-    private _apiMessages: ApiMessage[] = [];
     private _recursionDepth = 0;
     private static MAX_RECURSION_DEPTH = 5;
     private _commandDispatcher: CommandDispatcher;
+    private _historyManager: HistoryManager; // 使用 HistoryManager 管理内存状态
+    private _chatHistoryService: ChatHistoryService; // 使用 ChatHistoryService 管理持久化
+    private _pendingDiff?: { originalUri: vscode.Uri, newContent: string, diffUri: vscode.Uri }; // 挂起的 Diff
+    private _isWaitingForApproval = false; // [新增] 审批锁：防止递归循环
 
     constructor(
         private readonly _extensionUri: vscode.Uri,
@@ -23,11 +29,18 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         private readonly _systemPrompt: string
     ) {
         this._commandDispatcher = new CommandDispatcher();
+        this._historyManager = new HistoryManager(); // 初始化内存状态
+        this._chatHistoryService = new ChatHistoryService(); // 初始化持久化服务
     }
 
     public async resolveWebviewView(webviewView: vscode.WebviewView) {
         this._view = webviewView;
-        await this.loadSessionFromDisk();
+        
+        // 替换旧的 loadSessionFromDisk() 逻辑
+        const lastSession = await this._chatHistoryService.loadCheckpoint('session_history');
+        if (lastSession) {
+            this._historyManager.loadHistory(lastSession.history);
+        }
 
         webviewView.webview.options = { enableScripts: true, localResourceRoots: [this._extensionUri] };
         webviewView.webview.html = await this._getHtmlForWebview(webviewView.webview);
@@ -35,8 +48,10 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         webviewView.webview.onDidReceiveMessage(async (data) => {
             switch (data.type) {
                 case 'webviewLoaded':
-                    if (this._apiMessages.length > 0) {
-                        this._postWebviewMessage('restoreHistory', this._apiMessages.filter(m => (m.role === 'user' || m.role === 'assistant') && m.content).map(m => ({ role: m.role === 'assistant' ? 'ai' : 'user', content: m.content || "" })));
+                    // 使用 historyManager 获取数据
+                    const currentHistory = this._historyManager.getHistory();
+                    if (currentHistory.length > 0) {
+                        this._postWebviewMessage('restoreHistory', currentHistory.filter(m => (m.role === 'user' || m.role === 'assistant') && m.content).map(m => ({ role: m.role === 'assistant' ? 'ai' : 'user', content: m.content || "" })));
                     }
                     break;
                 case 'userInput':
@@ -54,8 +69,11 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
                         editor.edit(b => b.insert(editor.selection.active, data.value));
                     }
                     break;
-                case 'applyDiff':
-                    vscode.commands.executeCommand('opengravity.showDiff', data.value);
+                case 'applyLastDiff':
+                    await this.handleApplyDiff();
+                    break;
+                case 'cancelLastDiff':
+                    await this.handleCancelDiff();
                     break;
                 case 'runTerminal':
                     const t = vscode.window.activeTerminal || vscode.window.createTerminal("OPGV");
@@ -65,6 +83,57 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
                     break;
             }
         });
+    }
+
+    /**
+     * 处理“采纳修改” (对外公开接口)
+     */
+    public async handleApplyDiff() {
+        if (this._pendingDiff) {
+            try {
+                // 1. 执行写文件 (直接在 Provider 内处理，确保逻辑闭环)
+                const encoder = new TextEncoder();
+                await vscode.workspace.fs.writeFile(this._pendingDiff.originalUri, encoder.encode(this._pendingDiff.newContent));
+                
+                // 2. 清理 Diff 视图状态并关闭编辑器
+                DiffContentProvider.clear(this._pendingDiff.diffUri);
+                await vscode.commands.executeCommand('workbench.action.closeActiveEditor');
+                
+                // 3. 解锁并清理 UI 状态
+                this._isWaitingForApproval = false;
+                vscode.commands.executeCommand('setContext', 'opengravity.diffVisible', false);
+                
+                const feedback = `[USER ACTION] The proposed changes to \`${path.basename(this._pendingDiff.originalUri.fsPath)}\` have been APPROVED and applied. Please proceed with the next task.`;
+                this._historyManager.addItem({ role: 'user', content: feedback });
+                
+                this._pendingDiff = undefined;
+                vscode.window.showInformationMessage('✅ 修改已应用。');
+
+                // 4. 触发 AI 自动执行下一步
+                await this.handleUserMessage("", true);
+            } catch (err: any) {
+                vscode.window.showErrorMessage(`应用修改失败: ${err.message}`);
+            }
+        }
+    }
+
+    /**
+     * 处理“拒绝修改” (对外公开接口)
+     */
+    public async handleCancelDiff() {
+        if (this._pendingDiff) {
+            DiffContentProvider.clear(this._pendingDiff.diffUri);
+            await vscode.commands.executeCommand('workbench.action.closeActiveEditor');
+            
+            this._isWaitingForApproval = false;
+            vscode.commands.executeCommand('setContext', 'opengravity.diffVisible', false);
+            
+            const feedback = `[USER ACTION] The proposed changes to \`${path.basename(this._pendingDiff.originalUri.fsPath)}\` were REJECTED by the user. Please reconsider your approach.`;
+            this._historyManager.addItem({ role: 'user', content: feedback });
+            
+            this._pendingDiff = undefined;
+            await this.handleUserMessage("", true);
+        }
     }
 
     private async handleUserMessage(content: string, isToolResponse: boolean = false) {
@@ -87,9 +156,12 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
                 this._extensionUri,
                 async (fakeMsg) => {
                     // 用于注入合成消息的回调逻辑（TOML用）
-                    await this._storeUserMessage(fakeMsg);
+                    this._historyManager.addItem({ role: 'user', content: fakeMsg });
                     await this.handleUserMessage("", true);
-                }
+                },
+                this._historyManager,
+                this._chatHistoryService,
+                this // 传入 ChatViewProvider 实例
             );
 
             // 如果指令已执行并被消费，则停止后续 AI 流
@@ -116,22 +188,34 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
             return;
         }
 
-        this._ensureSystemPrompt();
+        await this._ensureSystemPrompt();
         if (content && !isToolResponse) {
-            await this._storeUserMessage(content);
+            this._historyManager.addItem({ role: 'user', content });
         }
 
         try {
             this._postWebviewMessage('streamStart', undefined);
             const allTools = await this._getAvailableTools();
-            const aiResponse = await this._getAIResponse(provider, this._apiMessages, allTools);
+            // 从 HistoryManager 获取数据
+            const aiResponse = await this._getAIResponse(provider, this._historyManager.getHistory(), allTools);
 
-            this._apiMessages.push(aiResponse);
+            this._historyManager.addItem(aiResponse);
             this._postWebviewMessage('streamEnd', undefined);
-            await this.saveSessionToDisk();
+            
+            // 自动保存当前进度（不重置 KV Cache）
+            await this._chatHistoryService.saveCheckpoint('session_history', this._historyManager.getHistory());
 
             if (aiResponse.tool_calls && aiResponse.tool_calls.length > 0) {
                 await this._executeToolCalls(aiResponse.tool_calls);
+                
+                // [关键修复] 检查是否正在等待用户审批。如果是，则中断递归。
+                if (this._isWaitingForApproval) {
+                    Logger.info("[OPGV] Truncating auto-resume loop: Waiting for user approval on code changes.");
+                    // 激活编辑器标题栏按钮
+                    vscode.commands.executeCommand('setContext', 'opengravity.diffVisible', true);
+                    return; 
+                }
+
                 Logger.info("[OPGV] All tools done. Auto-resuming...");
                 await this.handleUserMessage("", true);
             }
@@ -151,6 +235,17 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         this._postWebviewMessage('error', err.message || 'An unknown error occurred.');
     }
 
+    /**
+     * 外部接口：强制刷新系统提示词（用于 /memory refresh）
+     */
+    public async refreshSystemPrompt() {
+        this._historyManager.clearHistory();
+        await this._ensureSystemPrompt();
+        await this._chatHistoryService.saveCheckpoint('session_history', this._historyManager.getHistory());
+        this._postWebviewMessage('clearView', undefined);
+        this._postWebviewMessage('restoreHistory', [{ role: 'ai', content: '✅ **系统记忆已刷新**\n\n已重新加载 GEMINI.md 和 MCP 协议上下文。' }]);
+    }
+
     private async handleLinkActiveFile() {
         const editor = vscode.window.activeTextEditor;
         if (!editor) {
@@ -161,101 +256,50 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     }
 
     private async handleSaveAndClear() {
-        if (this._apiMessages.length <= 1) {
+        const currentHistory = this._historyManager.getHistory();
+        if (currentHistory.length <= 1) {
             return;
         }
-        const root = vscode.workspace.workspaceFolders?.[0].uri.fsPath;
-        if (!root) {
-            return;
-        }
-        const savePath = path.join(root, 'reviews', `archive_${Date.now()}.md`);
-        let output = "# Archive\n\n";
-        this._apiMessages.forEach(m => { 
-            if (m.content) {
-                output += `### [${m.role.toUpperCase()}]\n${m.content}\n\n---\n\n`; 
-            }
-        });
-        try {
-            await fs.promises.mkdir(path.dirname(savePath), { recursive: true });
-            await fs.promises.writeFile(savePath, output, 'utf-8');
-            this._apiMessages = [];
-            const hp = this.getHistoryPath();
-            if (hp) {
-                try {
-                    await fs.promises.access(hp); // Check if file exists
-                    await fs.promises.unlink(hp); // Unlink if it exists
-                } catch (e: any) {
-                    // File might not exist or other access error, which is fine for unlink
-                    if (e.code !== 'ENOENT') { // Ignore 'No such file or directory' error
-                        Logger.error("[OPGV] Error unlinking session history:", e);
-                    }
-                }
-            }
-            this._postWebviewMessage('clearView', undefined);
-        } catch (e: any) { vscode.window.showErrorMessage(e.message); }
+        
+        // 使用 ChatHistoryService 保存并清空
+        const saveTag = `archive_${Date.now()}`;
+        await this._chatHistoryService.saveCheckpoint(saveTag, currentHistory);
+        await this._chatHistoryService.deleteCheckpoint('session_history');
+        
+        this._historyManager.clearHistory();
+        this._postWebviewMessage('clearView', undefined);
+        
+        vscode.window.showInformationMessage(`会话已保存为 ${saveTag} 并清空。`);
     }
 
-    private getHistoryPath() {
-        const root = vscode.workspace.workspaceFolders?.[0].uri.fsPath;
-        return root ? path.join(root, '.opengravity', 'session_history.json') : undefined;
-    }
-
-    private async saveSessionToDisk() {
-        const hp = this.getHistoryPath();
-        if (hp) {
-            await fs.promises.mkdir(path.dirname(hp), { recursive: true });
-            await fs.promises.writeFile(hp, JSON.stringify(this._apiMessages, null, 2), 'utf-8');
-        }
-    }
-
-    private async loadSessionFromDisk() {
-        const hp = this.getHistoryPath();
-        if (hp) {
-            try {
-                await fs.promises.access(hp);
-                this._apiMessages = JSON.parse(await fs.promises.readFile(hp, 'utf-8'));
-            } catch (e: any) {
-                if (e.code !== 'ENOENT') {
-                    Logger.error("[OPGV] Error loading session history:", e);
-                }
-                this._apiMessages = [];
-            }
-        }
-    }
-
-    // 新增辅助方法: 确保系统提示词已添加到消息列表，并注入可用的MCP提示词描述
+    // 辅助方法重构
     private async _ensureSystemPrompt() {
-        if (this._apiMessages.length === 0) {
+        if (this._historyManager.getHistory().length === 0) {
             let systemContent = this._systemPrompt;
             
-            // 提取并注入可用的 MCP Prompts 信息
             const mcpPrompts = await this._mcpHost.getPromptsForAI();
             if (mcpPrompts.length > 0) {
                 systemContent += "\n\n## Available MCP Prompts:\n";
                 mcpPrompts.forEach(p => {
                     systemContent += `- [${p.serverName}] ${p.name}: ${p.description}\n`;
                 });
-                systemContent += "\nYou can use the `get_mcp_prompt` tool to get the content of these templates.";
             }
 
-            // 提取并注入可用的 MCP Resources 信息
             const mcpResources = await this._mcpHost.getResourcesForAI();
             if (mcpResources.length > 0) {
                 systemContent += "\n\n## Available MCP Resources:\n";
                 mcpResources.forEach(r => {
                     systemContent += `- [${r.serverName}] ${r.name} (URI: ${r.uri}): ${r.description}\n`;
                 });
-                systemContent += "\nYou can use the `get_mcp_resource` tool with the appropriate URI to get the content of these resources.";
             }
 
-            this._apiMessages.push({ role: 'system', content: systemContent });
+            this._historyManager.addItem({ role: 'system', content: systemContent });
         }
     }
 
-    // 新增辅助方法: 存储用户消息并保存会话到磁盘
     private async _storeUserMessage(content: string) {
-        this._apiMessages.push({ role: 'user', content });
-        await this.saveSessionToDisk();
+        this._historyManager.addItem({ role: 'user', content });
+        await this._chatHistoryService.saveCheckpoint('session_history', this._historyManager.getHistory());
     }
 
     private async _getAvailableTools(): Promise<any[]> {
@@ -297,23 +341,50 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
             } catch (e: any) {
                 Logger.error(`[OPGV] Error parsing tool call arguments for ${funcName}:`, e);
                 result = JSON.stringify({
-                    error: `Failed to parse arguments for tool '${funcName}'. Ensure arguments are valid JSON. Error: ${e.message}`,
+                    error: `Failed to parse arguments for tool '${funcName}'. Error: ${e.message}`,
                     rawArguments: toolCall.function.arguments
                 });
-                this._apiMessages.push({
-                    role: 'tool',
-                    tool_call_id: toolCall.id,
-                    content: result
-                });
-                // Continue to next tool call if parsing failed for this one
+                this._historyManager.addItem({ role: 'tool', tool_call_id: toolCall.id, content: result });
                 continue; 
             }
             if (funcName === 'read_file') {
                 result = await ToolExecutor.read_file(args);
             } else if (funcName === 'write_file') {
                 result = await ToolExecutor.write_file(args);
+            } else if (funcName === 'replace') {
+                // [Surgical Edit 联动] 标记进入审批锁定状态
+                this._isWaitingForApproval = true;
+                
+                const fullPath = (ToolExecutor as any).getSafePath(args.path);
+                if (fullPath) {
+                    try {
+                        const content = await fs.promises.readFile(fullPath, 'utf-8');
+                        const firstIndex = content.indexOf(args.old_string);
+                        if (firstIndex !== -1 && content.lastIndexOf(args.old_string) === firstIndex) {
+                            const newContent = content.slice(0, firstIndex) + args.new_string + content.slice(firstIndex + args.old_string.length);
+                            const uri = vscode.Uri.file(fullPath);
+                            
+                            // 使用 DiffContentProvider.register 确保内容被正确缓存
+                            const diffUri = DiffContentProvider.register(uri, newContent);
+                            
+                            this._pendingDiff = {
+                                originalUri: uri,
+                                newContent: newContent,
+                                diffUri: diffUri
+                            };
+                        }
+                    } catch (e) {
+                        Logger.error(`[OPGV] Failed to prepare pending diff: ${e}`);
+                    }
+                }
+                result = await ToolExecutor.replace(args);
+                // [关键新增] 显式通知 Webview 渲染侧边栏按钮面板
+                this._postWebviewMessage('showApprovalPanel', undefined);
             } else if (funcName === 'run_command') {
-                result = await ToolExecutor.run_command(args);
+                // [Phase 7] 启用终端流式反馈，并确保结果回传给 AI
+                result = await ToolExecutor.run_command(args, (chunk) => {
+                    this._postWebviewMessage('streamUpdate', chunk, 'terminal');
+                });
             } else if (funcName === 'get_mcp_prompt') {
                 result = await this._mcpHost.getPromptContent(args.server_name, args.prompt_name, args.arguments);
             } else if (funcName === 'get_mcp_resource') {
@@ -321,23 +392,21 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
             } else {
                 result = await this._mcpHost.executeTool(funcName, args);
             }
-            this._apiMessages.push({
-                role: 'tool',
-                tool_call_id: toolCall.id,
-                content: result
-            });
+            this._historyManager.addItem({ role: 'tool', tool_call_id: toolCall.id, content: result });
         }
-        await this.saveSessionToDisk();
+        await this._chatHistoryService.saveCheckpoint('session_history', this._historyManager.getHistory());
     }
 
     private async _getHtmlForWebview(webview: vscode.Webview) {
         const scriptUri = webview.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'src', 'webview', 'chat.js'));
         const styleUri = webview.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'src', 'webview', 'chat.css'));
+        const ansiUpUri = webview.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'src', 'webview', 'libs', 'ansi_up.js'));
         const htmlPath = vscode.Uri.joinPath(this._extensionUri, 'src', 'webview', 'chat.html');
         
         let html = await fs.promises.readFile(htmlPath.fsPath, 'utf8');
         html = html.replace('{{styleUri}}', styleUri.toString());
         html = html.replace('{{scriptUri}}', scriptUri.toString());
+        html = html.replace('{{ansiUpUri}}', ansiUpUri.toString());
         
         return html;
     }

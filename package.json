@@ -35,8 +35,32 @@
       {
         "command": "opengravity.ask",
         "title": "Opengravity: Ask a Question"
+      },
+      {
+        "command": "opengravity.applyDiff",
+        "title": "Accept Changes",
+        "icon": "$(check)"
+      },
+      {
+        "command": "opengravity.cancelDiff",
+        "title": "Reject Changes",
+        "icon": "$(x)"
       }
     ],
+    "menus": {
+      "editor/title": [
+        {
+          "command": "opengravity.applyDiff",
+          "when": "opengravity.diffVisible && resourceScheme == 'opengravity-diff'",
+          "group": "navigation"
+        },
+        {
+          "command": "opengravity.cancelDiff",
+          "when": "opengravity.diffVisible && resourceScheme == 'opengravity-diff'",
+          "group": "navigation"
+        }
+      ]
+    },
     "configuration": {
       "title": "Opengravity",
       "properties": {

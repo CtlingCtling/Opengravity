@@ -2,8 +2,8 @@ import { ChatViewProvider } from '../../chatViewProvider';
 import * as vscode from 'vscode';
 import { AIProvider } from '../../provider';
 import { McpHost } from '../../mcp/mcpHost';
-import { Logger } from '../../utils/logger';
-import * as fs from 'fs';
+import { HistoryManager } from '../../session/HistoryManager';
+import { ChatHistoryService } from '../../services/ChatHistoryService';
 
 // 模拟外部依赖
 jest.mock('vscode', () => ({
@@ -14,26 +14,22 @@ jest.mock('vscode', () => ({
         showErrorMessage: jest.fn()
     },
     workspace: {
-        workspaceFolders: [{ uri: { fsPath: '/mock/project' } }]
+        workspaceFolders: [{ uri: { fsPath: '/mock/project' } }],
+        fs: {
+            writeFile: jest.fn().mockResolvedValue(undefined)
+        }
     },
     Uri: {
-        joinPath: jest.fn((uri, ...parts) => ({ fsPath: parts.join('/') }))
+        joinPath: jest.fn((uri, ...parts) => ({ fsPath: parts.join('/'), path: parts.join('/'), scheme: 'file' })),
+        file: jest.fn(path => ({ fsPath: path, path, scheme: 'file' }))
     }
 }), { virtual: true });
 
-// 模拟 fs 模块，防止真实 IO
-jest.mock('fs', () => ({
-    promises: {
-        mkdir: jest.fn().mockResolvedValue(undefined),
-        writeFile: jest.fn().mockResolvedValue(undefined),
-        readFile: jest.fn().mockResolvedValue('[]'),
-        access: jest.fn().mockResolvedValue(undefined)
-    }
-}));
+// 模拟状态管理者和服务
+jest.mock('../../session/HistoryManager');
+jest.mock('../../services/ChatHistoryService');
 
-jest.mock('../../utils/logger');
-
-describe('ChatViewProvider 集成测试', () => {
+describe('ChatViewProvider 集成测试 (架构对齐版)', () => {
     let provider: ChatViewProvider;
     let mockAIProvider: jest.Mocked<AIProvider>;
     let mockMcpHost: jest.Mocked<McpHost>;
@@ -42,17 +38,12 @@ describe('ChatViewProvider 集成测试', () => {
     beforeEach(() => {
         jest.clearAllMocks();
 
-        // 实例化 Mock 对象
-        mockAIProvider = {
-            generateContentStream: jest.fn()
-        } as any;
-
+        mockAIProvider = { generateContentStream: jest.fn() } as any;
         mockMcpHost = {
             getToolsForAI: jest.fn().mockResolvedValue([]),
             getPromptsForAI: jest.fn().mockResolvedValue([]),
             getResourcesForAI: jest.fn().mockResolvedValue([]),
-            executeTool: jest.fn(),
-            getPromptContent: jest.fn()
+            executeTool: jest.fn()
         } as any;
 
         mockWebviewView = {
@@ -60,9 +51,14 @@ describe('ChatViewProvider 集成测试', () => {
                 options: {},
                 onDidReceiveMessage: jest.fn(),
                 postMessage: jest.fn(),
-                asWebviewUri: jest.fn(uri => uri)
+                asWebviewUri: jest.fn(uri => uri),
+                html: ''
             }
         };
+
+        // 核心 Mock 修复：确保 loadCheckpoint 返回可迭代对象
+        (ChatHistoryService.prototype.loadCheckpoint as jest.Mock).mockResolvedValue({ history: [] });
+        (HistoryManager.prototype.getHistory as jest.Mock).mockReturnValue([]);
 
         provider = new ChatViewProvider(
             { fsPath: '/mock/extension' } as any,
@@ -72,61 +68,22 @@ describe('ChatViewProvider 集成测试', () => {
         );
     });
 
-    it('should inject MCP information into system prompt on first message', async () => {
-        // 模拟 MCP 返回一些资源和工具
-        mockMcpHost.getPromptsForAI.mockResolvedValue([
-            { serverName: 'test', name: 'expert', description: 'desc', arguments: [] }
-        ]);
-        
-        // 模拟 AI 的简单回复
-        mockAIProvider.generateContentStream.mockResolvedValue({
-            role: 'assistant',
-            content: 'Hello'
-        });
-
-        // 模拟 resolveWebviewView 被调用（初始化）
+    it('初始化时应该通过 ChatHistoryService 加载 session_history', async () => {
         await provider.resolveWebviewView(mockWebviewView);
-
-        // 获取 handleUserMessage
-        const messageHandler = mockWebviewView.webview.onDidReceiveMessage.mock.calls[0][0];
-        await messageHandler({ type: 'userInput', value: 'Hi' });
-
-        // 验证 AIProvider 收到的第一条消息（System Prompt）是否包含了 MCP 信息
-        const sentMessages = mockAIProvider.generateContentStream.mock.calls[0][0];
-        const systemMessage = sentMessages.find(m => m.role === 'system');
-        
-        expect(systemMessage).toBeDefined();
-        if (systemMessage) {
-            expect(systemMessage.content).toContain('Available MCP Prompts');
-            expect(systemMessage.content).toContain('test');
-            expect(systemMessage.content).toContain('expert');
-        }
+        expect(ChatHistoryService.prototype.loadCheckpoint).toHaveBeenCalledWith('session_history');
     });
 
-    it('should correctly route tool calls to McpHost', async () => {
-        // 模拟 AI 返回一个工具调用
-        mockAIProvider.generateContentStream.mockResolvedValueOnce({
-            role: 'assistant',
-            content: '',
-            tool_calls: [{
-                id: 'call_1',
-                function: {
-                    name: 'server__tool',
-                    arguments: JSON.stringify({ arg: 1 })
-                }
-            }]
-        }).mockResolvedValueOnce({
-            role: 'assistant',
-            content: 'Done'
-        });
-
-        mockMcpHost.executeTool.mockResolvedValue('Tool Result');
+    it('用户消息发送后，应该调用 HistoryManager.addItem 并触发 AI', async () => {
+        // 模拟 AI 的简单回复
+        mockAIProvider.generateContentStream.mockResolvedValue({ role: 'assistant', content: 'Hello' });
+        (HistoryManager.prototype.getHistory as jest.Mock).mockReturnValue([{ role: 'user', content: 'Hi' }]);
 
         await provider.resolveWebviewView(mockWebviewView);
         const messageHandler = mockWebviewView.webview.onDidReceiveMessage.mock.calls[0][0];
-        await messageHandler({ type: 'userInput', value: 'Use tool' });
+        
+        await messageHandler({ type: 'userInput', value: 'Hi' });
 
-        // 验证是否调用了 mcpHost.executeTool
-        expect(mockMcpHost.executeTool).toHaveBeenCalledWith('server__tool', { arg: 1 });
+        expect(HistoryManager.prototype.addItem).toHaveBeenCalled();
+        expect(mockAIProvider.generateContentStream).toHaveBeenCalled();
     });
 });

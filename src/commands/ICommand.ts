@@ -2,6 +2,8 @@ import * as vscode from 'vscode';
 import { AIProvider } from '../provider';
 import { McpHost } from '../mcp/mcpHost';
 import { CommandRegistry } from './Registry';
+import { HistoryManager } from '../session/HistoryManager';
+import { ChatHistoryService } from '../services/ChatHistoryService';
 
 /**
  * 指令执行上下文，为指令提供各种系统能力的引用
@@ -12,6 +14,9 @@ export interface CommandContext {
     webview: vscode.Webview;
     extensionUri: vscode.Uri;
     registry: CommandRegistry;
+    historyManager: HistoryManager;
+    chatHistoryService: ChatHistoryService;
+    chatViewProvider: any; // 传入 ChatViewProvider 实例以支持高级刷新
     // 用于向对话流注入“虚拟用户消息”的回调
     onInjectMessage: (content: string) => Promise<void>;
 }

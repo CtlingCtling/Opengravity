@@ -16,7 +16,7 @@ export interface AIProvider {
 
 export class DeepSeekProvider implements AIProvider {
     private openai: OpenAI;
-    private static readonly MAX_TOKENS = 65000;
+    private static readonly MAX_TOKENS = 8192;
 
     constructor(apiKey: string) {
         this.openai = new OpenAI({ baseURL: 'https://api.deepseek.com/v1', apiKey });
@@ -88,8 +88,12 @@ export class DeepSeekProvider implements AIProvider {
 
             return { role: 'assistant', content: fullContent || null, reasoning_content: fullReasoning, tool_calls: toolCallsBuffer.length > 0 ? toolCallsBuffer : undefined };
         } catch (error: any) {
-            Logger.error(`API Error: ${error.message}`, error); // Log the API error
-            onUpdate({ type: 'content', delta: `[API Error]: ${error.message}` });
+            Logger.error(`API Error: ${error.message}`, error); 
+            let errorMsg = `[API Error]: ${error.message}`;
+            if (error.message.includes('context length')) {
+                errorMsg += "\n\n💡 **Tip:** Context is near its limit. Use `/compress` to prune conversation history.";
+            }
+            onUpdate({ type: 'content', delta: errorMsg });
             return { role: 'assistant', content: error.message };
         }
     }

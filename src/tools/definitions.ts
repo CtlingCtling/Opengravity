@@ -39,6 +39,25 @@ export const OPGV_TOOLS = [
     {
         type: "function",
         function: {
+            name: "replace",
+            description: "精准局部修改工具。通过定位旧文本片段并替换为新文本，适用于修改大文件而无需重写全文。建议提供至少 3 行上下文以保证唯一定位。",
+            parameters: {
+                type: "object",
+                properties: {
+                    path: { type: "string", description: "目标文件的相对路径" },
+                    old_string: { type: "string", description: "待替换的精确原文本" },
+                    new_string: { type: "string", description: "替换后的新文本" },
+                    instruction: { type: "string", description: "本次修改的简要描述" }
+                },
+                required: ["path", "old_string", "new_string", "instruction"],
+                additionalProperties: false
+            },
+            strict: true
+        }
+    },
+    {
+        type: "function",
+        function: {
             name: "run_command",
             description: "在用户终端执行 Shell 命令（如编译 gcc、查看目录 ls 等）。",
             parameters: {

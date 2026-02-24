@@ -6,6 +6,8 @@ import * as vscode from 'vscode';
 import { Logger } from '../utils/logger';
 import { AtHandler } from './at/AtHandler';
 import { ShellHandler } from './shell/ShellHandler';
+import { HistoryManager } from '../session/HistoryManager'; // 引入 HistoryManager
+import { ChatHistoryService } from '../services/ChatHistoryService'; // 引入 ChatHistoryService
 
 export class CommandDispatcher {
     private registry: CommandRegistry;
@@ -34,7 +36,10 @@ export class CommandDispatcher {
         mcp: McpHost, 
         webview: vscode.Webview, 
         extensionUri: vscode.Uri,
-        onInjectMessage: (content: string) => Promise<void>
+        onInjectMessage: (content: string) => Promise<void>,
+        historyManager: HistoryManager,
+        chatHistoryService: ChatHistoryService,
+        chatViewProvider: any // 新增
     ): Promise<CommandResult | null> {
         const trimmedText = text.trim();
 
@@ -44,7 +49,10 @@ export class CommandDispatcher {
             webview,
             extensionUri,
             registry: this.registry,
-            onInjectMessage
+            onInjectMessage,
+            historyManager,
+            chatHistoryService,
+            chatViewProvider // 注入
         };
 
         // 1. 处理 Slash Commands (/)

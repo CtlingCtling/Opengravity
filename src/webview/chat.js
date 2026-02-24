@@ -1,197 +1,230 @@
 const vscode = acquireVsCodeApi();
 
-// --- Components ---
+// --- Initialization: AnsiUp ---
+let ansiUp = null;
+try {
+    // 检查 ansi_up 是否成功加载
+    if (typeof AnsiUp !== 'undefined') {
+        ansiUp = new AnsiUp();
+    } else {
+        console.warn("AnsiUp not found, falling back to plain text.");
+    }
+} catch (e) {
+    console.error("AnsiUp init error:", e);
+}
 
-class ChatBox {
-    constructor(elementId) {
-        this.element = document.getElementById(elementId);
-        this.curEof = null;
+// --- DOM Elements ---
+const chatBox = document.getElementById('chat-box');
+const inputArea = document.getElementById('input');
+
+// --- Global State ---
+let currentStreamMsg = null;
+let markdownBuffer = "";
+
+// --- Input Handling ---
+function performSend() {
+    const text = inputArea.value.trim();
+    if (text) {
+        appendMessage('user', text);
+        vscode.postMessage({ type: 'userInput', value: text });
+        inputArea.value = '';
+        inputArea.style.height = 'auto';
+    }
+}
+
+inputArea.addEventListener('input', function() {
+    this.style.height = 'auto';
+    this.style.height = Math.min(this.scrollHeight, 150) + 'px';
+});
+
+inputArea.addEventListener('keydown', function(e) {
+    if (e.key === 'Enter' && e.altKey) {
+        e.preventDefault();
+        performSend();
+    }
+});
+
+// --- Message Rendering ---
+function appendMessage(role, text = "") {
+    const msgDiv = document.createElement('div');
+    msgDiv.className = `msg ${role}`;
+    
+    msgDiv.innerHTML = `
+        <div class="role-label">${role === 'user' ? 'USER' : 'OPENGRAVITY'}</div>
+        <div class="reasoning"></div>
+        <div class="content"></div>
+        <!-- 重点：隔离区域，不被 innerHTML 覆盖 -->
+        <div class="attachments"></div>
+    `;
+
+    const contentDiv = msgDiv.querySelector('.content');
+    if (text) {
+        contentDiv.innerHTML = role === 'user' ? escapeHtml(text) : safeParseMarkdown(text);
     }
 
-    appendMessage(role, text) {
-        const div = document.createElement('div');
-        div.className = 'msg ' + role;
-        const label = role === 'user' ? 'USER' : 'OPENGRAVITY';
-        div.innerHTML = `
-            <div style="font-weight:bold;margin-bottom:5px">[${label}]</div>
-            <div class="reasoning"></div>
-            <div class="content"></div>
+    chatBox.appendChild(msgDiv);
+    scrollToBottom();
+
+    return {
+        element: msgDiv,
+        content: contentDiv,
+        attachments: msgDiv.querySelector('.attachments')
+    };
+}
+
+function safeParseMarkdown(text) {
+    try {
+        return marked.parse(text);
+    } catch (e) {
+        return text.replace(/\n/g, '<br>');
+    }
+}
+
+function scrollToBottom() {
+    chatBox.scrollTop = chatBox.scrollHeight;
+}
+
+function escapeHtml(text) {
+    const map = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' };
+    return text.replace(/[&<>"']/g, m => map[m]);
+}
+
+// --- Thinking Process (Reasoning) ---
+function getOrCreateReasoning(msgObj) {
+    let reasoningBlock = msgObj.element.querySelector('.reasoning');
+    if (!reasoningBlock.innerHTML) {
+        reasoningBlock.className = 'reasoning open';
+        reasoningBlock.innerHTML = `
+            <div class="reasoning-toggle">
+                <span class="reasoning-icon">▶</span> <span>Thinking Process</span>
+            </div>
+            <div class="reasoning-content"></div>
         `;
-        if (role === 'user') {
-            div.querySelector('.content').textContent = text;
-        }
-        this.element.appendChild(div);
-        this.scrollToBottom();
-        return {
-            reasoning: div.querySelector('.reasoning'),
-            content: div.querySelector('.content'),
-            element: div
+        reasoningBlock.querySelector('.reasoning-toggle').onclick = () => {
+            reasoningBlock.classList.toggle('open');
+            scrollToBottom();
         };
     }
-
-    clear() {
-        this.element.innerHTML = '<div style="color:var(--ai-c)">[SYSTEM] Memory Purged. Archive Created.</div>';
-    }
-
-    reset() {
-        this.element.innerHTML = '';
-    }
-
-    scrollToBottom() {
-        this.element.scrollTop = this.element.scrollHeight;
-    }
-
-    removeEof() {
-        if (this.curEof) {
-            this.curEof.remove();
-            this.curEof = null;
-        }
-    }
-
-    addEof(element) {
-        const eofTag = document.createElement('span');
-        eofTag.textContent = ' [EOF]';
-        eofTag.style.color = 'var(--gray)';
-        eofTag.style.fontWeight = 'bold';
-        eofTag.style.fontSize = '10px';
-        element.appendChild(eofTag);
-    }
+    return reasoningBlock.querySelector('.reasoning-content');
 }
 
-class InputBar {
-    constructor(textareaId) {
-        this.textarea = document.getElementById(textareaId);
-        this.setupListeners();
+// --- Terminal Rendering (隔离在 attachments 中) ---
+function getOrCreateTerminal(msgObj) {
+    let termBlock = msgObj.attachments.querySelector('.terminal-block');
+    if (!termBlock) {
+        termBlock = document.createElement('div');
+        termBlock.className = 'terminal-block';
+        termBlock.innerHTML = `
+            <div class="terminal-header">
+                <span>Console</span>
+                <div class="term-status"><div class="status-indicator running"></div></div>
+            </div>
+            <div class="terminal-body"></div>
+        `;
+        msgObj.attachments.appendChild(termBlock);
     }
-
-    setupListeners() {
-        this.textarea.addEventListener('input', () => this.autoResize());
-        this.textarea.addEventListener('keydown', e => {
-            if (e.key === 'Enter' && e.altKey) {
-                e.preventDefault();
-                this.send();
-            }
-        });
-    }
-
-    autoResize() {
-        this.textarea.style.height = 'auto';
-        this.textarea.style.height = this.textarea.scrollHeight + 'px';
-    }
-
-    send() {
-        const val = this.textarea.value.trim();
-        if (!val) {
-            return;
-        }
-        
-        chatBoxComp.appendMessage('user', val);
-        vscode.postMessage({ type: 'userInput', value: val });
-        
-        this.textarea.value = '';
-        this.autoResize();
-    }
-
-    setValue(val) {
-        this.textarea.value = val;
-        this.textarea.focus();
-        this.autoResize();
-    }
+    return termBlock.querySelector('.terminal-body');
 }
 
-// --- Initialize Components ---
+// --- Approval Widget (隔离在 attachments 中) ---
+function showApprovalWidget(msgObj) {
+    if (msgObj.attachments.querySelector('.approval-widget')) return;
 
-const chatBoxComp = new ChatBox('chat-box');
-const inputBarComp = new InputBar('input');
+    const widget = document.createElement('div');
+    widget.className = 'approval-widget';
+    widget.innerHTML = `
+        <div class="approval-title">✨ Code Change Request</div>
+        <div class="approval-buttons">
+            <button class="btn btn-primary" id="btn-approve">Accept Changes</button>
+            <button class="btn btn-danger" id="btn-reject">Reject</button>
+        </div>
+    `;
 
-let activeStream = null;
-let mdBuf = "";
+    widget.querySelector('#btn-approve').onclick = () => {
+        vscode.postMessage({ type: 'applyLastDiff' });
+        widget.remove();
+    };
+    widget.querySelector('#btn-reject').onclick = () => {
+        vscode.postMessage({ type: 'cancelLastDiff' });
+        widget.remove();
+    };
 
-// --- Global Helpers ---
-
-function linkFile() { 
-    vscode.postMessage({ type: 'linkActiveFile' }); 
+    msgObj.attachments.appendChild(widget);
+    scrollToBottom();
 }
 
-function saveClear() { 
-    vscode.postMessage({ type: 'saveAndClear' }); 
-}
-
-function updateContent(element, markdown) {
-    element.innerHTML = marked.parse(markdown);
-}
-
-// --- Event Listeners ---
-
-document.addEventListener('click', e => {
-    const pre = e.target.closest('pre');
-    if (pre) {
-        const code = pre.innerText.replace("CLICK TO INSERT", "").trim();
-        vscode.postMessage({ type: 'insertCode', value: code });
-    }
-});
-
+// --- Message Handler ---
 window.addEventListener('message', event => {
     const msg = event.data;
+
     switch (msg.type) {
         case 'streamStart':
-            chatBoxComp.removeEof();
-            activeStream = chatBoxComp.appendMessage('ai', '');
-            mdBuf = "";
+            currentStreamMsg = appendMessage('ai');
+            markdownBuffer = "";
             break;
+
         case 'streamUpdate':
-            if (activeStream) {
-                if (msg.dataType === 'reasoning') {
-                    activeStream.reasoning.style.display = 'block';
-                    activeStream.reasoning.textContent += msg.value;
+            if (!currentStreamMsg) return;
+
+            if (msg.dataType === 'reasoning') {
+                const reasoningContent = getOrCreateReasoning(currentStreamMsg);
+                reasoningContent.textContent += msg.value;
+            } else if (msg.dataType === 'terminal') {
+                // 终端数据：追加到隔离的 terminal-block 中
+                const termBody = getOrCreateTerminal(currentStreamMsg);
+                if (ansiUp) {
+                    termBody.innerHTML += ansiUp.ansi_to_html(msg.value);
                 } else {
-                    mdBuf += msg.value;
-                    updateContent(activeStream.content, mdBuf);
+                    termBody.textContent += msg.value;
                 }
-                chatBoxComp.scrollToBottom();
+                termBody.scrollTop = termBody.scrollHeight;
+            } else {
+                // 文本数据：只更新 content 区域，不再影响其他附件
+                markdownBuffer += msg.value;
+                currentStreamMsg.content.innerHTML = safeParseMarkdown(markdownBuffer);
             }
+            scrollToBottom();
             break;
+
         case 'streamEnd':
-            if (activeStream) {
-                chatBoxComp.addEof(activeStream.content);
-            }
-            activeStream = null;
-            mdBuf = "";
-            break;
-        case 'clearView':
-            chatBoxComp.clear();
-            break;
-        case 'aiResponse':
-            chatBoxComp.removeEof();
-            const responseObj = chatBoxComp.appendMessage('ai', '');
-            updateContent(responseObj.content, msg.value);
-            chatBoxComp.addEof(responseObj.content);
-            chatBoxComp.scrollToBottom();
-            break;
-        case 'restoreHistory':
-            chatBoxComp.reset();
-            msg.value.forEach(m => {
-                const role = m.role === 'assistant' ? 'ai' : 'user';
-                const msgObj = chatBoxComp.appendMessage(role, m.content);
-                if (role === 'ai') {
-                    updateContent(msgObj.content, m.content || '');
-                } else {
-                    msgObj.content.textContent = m.content || '';
+            if (currentStreamMsg) {
+                const indicator = currentStreamMsg.attachments.querySelector('.status-indicator');
+                if (indicator) {
+                    indicator.classList.remove('running');
+                    indicator.classList.add('success');
                 }
-            });
-            chatBoxComp.scrollToBottom();
+                hljs.highlightAll();
+            }
+            currentStreamMsg = null;
             break;
+
+        case 'showApprovalPanel':
+            // 总是附加到最新的 AI 消息
+            const aiMsgs = document.querySelectorAll('.msg.ai');
+            if (aiMsgs.length > 0) {
+                const lastAi = aiMsgs[aiMsgs.length - 1];
+                showApprovalWidget({ 
+                    element: lastAi, 
+                    attachments: lastAi.querySelector('.attachments') 
+                });
+            }
+            break;
+            
+        case 'restoreHistory':
+            chatBox.innerHTML = '';
+            msg.value.forEach(m => appendMessage(m.role === 'ai' ? 'ai' : 'user', m.content));
+            break;
+            
         case 'fillInput':
-            inputBarComp.setValue(msg.value);
+            inputArea.value = msg.value;
+            inputArea.focus();
             break;
-        case 'error':
-            const errorDiv = document.createElement('div');
-            errorDiv.style.color = "red";
-            errorDiv.textContent = "[!] " + msg.value;
-            chatBoxComp.element.appendChild(errorDiv);
+
+        case 'clearView':
+            chatBox.innerHTML = '';
             break;
     }
 });
 
-// Signal that webview is ready
+// Signal ready
 vscode.postMessage({ type: 'webviewLoaded' });

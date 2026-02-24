@@ -67,6 +67,23 @@ export class McpHost {
                 Logger.error(`[❌] MCP: Error disconnecting ${name}: ${err.message}`);
             }
         }
+        this.clients.clear();
+        this.isInitialized = false;
+    }
+
+    /**
+     * 重启 MCP 服务
+     */
+    async reload() {
+        await this.shutdown();
+        await this.startup();
+    }
+
+    /**
+     * 获取已连接服务器列表
+     */
+    getServerNames(): string[] {
+        return Array.from(this.clients.keys());
     }
 
     async startup() {

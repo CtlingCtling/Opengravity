@@ -5,20 +5,17 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="stylesheet" href="{{styleUri}}">
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="{{ansiUpUri}}"></script> 
 </head>
 <body>
     <div id="chat-box"></div>
-    <div id="bottom-container">
-        <div id="action-bar">
-            <div class="btn" onclick="linkFile()">[LINK_FILE]</div>
-            <div class="btn" onclick="saveClear()">[SAVE_&_CLEAR]</div>
-        </div>
+    
+    <div id="input-area">
         <div class="input-wrapper">
-            <span style="color:var(--ai-c); margin-right:8px; font-weight:bold">></span>
-            <textarea id="input" rows="1" placeholder="Option+Enter to Send"></textarea>
+            <textarea id="input" placeholder="⌥ + Enter to Send" rows="1"></textarea>
         </div>
-        <div style="font-size:9px;color:#666;text-align:right;margin-top:4px">⌥ Option + Enter to SEND</div>
     </div>
+
     <script src="{{scriptUri}}"></script>
 </body>
 </html>

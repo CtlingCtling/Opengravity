@@ -1,16 +1,13 @@
-/**
- * ## executor.ts - Opengravity 工具 (审查后修改建议)
- * #SENIOR_ENGINEER_NOTE:
- * - [安全加固] 禁用了存在严重安全风险的 `run_command` 函数。直接执行来自AI的命令是极其危险的。
- * - [性能改进] 将所有同步文件I/O替换为异步版本，以防阻塞UI线程。
- * - [路径安全] 在读写文件前，通过 `path.normalize` 和 `startsWith` 检查来防止路径遍历攻击 (Path Traversal)。确保所有文件操作都限制在项目工作区内。
- * - [明确职责] 提供了更安全的命令执行替代方案的建议，即将通用 `run_command` 替换为更具体的、封装好的函数 (例如 `compile_c_file`, `list_directory`)。
- */
 import * as vscode from 'vscode';
 import { promises as fs } from 'fs';
 import * as path from 'path';
+import * as cp from 'child_process';
 import { Logger } from '../utils/logger';
 
+/**
+ * ToolExecutor: 核心工具执行逻辑
+ * 封装了所有 AI 可以调用的原子操作
+ */
 export class ToolExecutor {
     private static getRootPath(): string | undefined {
         const folders = vscode.workspace.workspaceFolders;
@@ -19,93 +16,125 @@ export class ToolExecutor {
 
     /**
      * 规范化并验证路径是否在工作区内。
-     * @param relativePath - 用户或AI提供的相对路径。
-     * @returns 返回一个安全的、绝对的路径，如果路径无效或越界则返回 undefined。
      */
     private static getSafePath(relativePath: string): string | undefined {
         const rootPath = this.getRootPath();
-        if (!rootPath) {
-            return undefined;
-        }
-
-        // 规范化路径，解析 '..' 等
+        if (!rootPath) return undefined;
         const absolutePath = path.normalize(path.join(rootPath, relativePath));
-
-        // [安全检查] 确保规范化后的路径仍然在工作区根目录之内。
-        // 这是防止路径遍历攻击的关键。
-        if (!absolutePath.startsWith(rootPath)) {
-            return undefined;
-        }
+        if (!absolutePath.startsWith(rootPath)) return undefined;
         return absolutePath;
+    }
+
+    /**
+     * 运行终端命令 (流式重构版 - Phase 7 - 修复版)
+     * @param args { command: string }
+     * @param onOutput 流式输出回调
+     */
+    static async run_command(args: { command: string }, onOutput?: (chunk: string) => void): Promise<string> {
+        const rootPath = this.getRootPath();
+        if (!rootPath) return "[❌] Error: No workspace folder opened.";
+
+        // [安全校验]
+        const dangerousCommands = ['rm -rf /', 'sudo ', ':(){ :|:& };:'];
+        if (dangerousCommands.some(cmd => args.command.includes(cmd))) {
+            return `[❌] SECURITY ALERT: Command "${args.command}" is prohibited.`;
+        }
+
+        // [模态确认]
+        const confirm = await vscode.window.showWarningMessage(
+            `[⚠️] AI 请求运行命令: \`${args.command}\``,
+            { modal: true },
+            '确认执行 (RUN)', '拒绝 (DENY)'
+        );
+
+        if (confirm !== '确认执行 (RUN)') {
+            return "[❌] 操作被用户拒绝。";
+        }
+
+        return new Promise((resolve) => {
+            // [修复] 简化 Spawn 调用，移除显式 Shell 嵌套
+            // Node.js 的 { shell: true } 会自动处理跨平台兼容性
+            const env = Object.assign({}, process.env, { OPENGRAVITY: "1" });
+
+            const child = cp.spawn(args.command, {
+                cwd: rootPath,
+                env: env,
+                shell: true
+            });
+
+            let stdoutBuf = "";
+            let stderrBuf = "";
+
+            child.stdout.on('data', (data) => {
+                const chunk = data.toString();
+                stdoutBuf += chunk;
+                if (onOutput) onOutput(chunk);
+            });
+
+            child.stderr.on('data', (data) => {
+                const chunk = data.toString();
+                stderrBuf += chunk;
+                if (onOutput) onOutput(chunk);
+            });
+
+            // 监听 close 而非 exit，确保 stdio 流已关闭
+            child.on('close', (code) => {
+                const isSuccess = code === 0;
+                const status = isSuccess ? "SUCCESS" : `FAILED (Exit Code: ${code})`;
+                const combinedOutput = stdoutBuf + stderrBuf;
+                
+                const resultSummary = `\n[COMMAND EXECUTION REPORT]\n- Command: ${args.command}\n- Status: ${status}\n- Output Length: ${combinedOutput.length} chars\n---\n${combinedOutput || "(No visible output captured)"}\n---`.trim();
+                resolve(resultSummary);
+            });
+
+            child.on('error', (err) => {
+                resolve(`[❌] Spawning Error: ${err.message}`);
+            });
+        });
     }
 
     static async read_file(args: { path: string }): Promise<string> {
         const fullPath = this.getSafePath(args.path);
-        if (!fullPath) {
-            return `[❌] 错误: 无效或越界的路径 | Error: Invalid or out-of-bounds path.`;
-        }
-
-        const confirm = await vscode.window.showInformationMessage(
-            `[📖] Opengravity 请求读取: ${args.path} | OPGV wants to read.`, 'ACPT', 'RJCT'
-        );
-        if (confirm !== 'ACPT') {
-            return "[❌] 操作被用户拒绝 | User denied read access.";
-        }
+        if (!fullPath) return `[❌] 错误: 无效或越界的路径。`;
 
         try {
-            // 使用异步API
             return await fs.readFile(fullPath, 'utf-8');
         } catch (e: any) {
-            Logger.error(`Error reading file: ${e.message}`, e); // Log the error with Logger
-            if (e.code === 'ENOENT') {
-                return "[❌] 没有找到文件 | File not found.";
-            }
-            return `[❌] 读取文件时发生错误 | Error reading file: ${e.message}`;
+            Logger.error(`Error reading file: ${e.message}`, e);
+            return `[❌] 读取文件时发生错误: ${e.message}`;
         }
     }
 
     static async write_file(args: { path: string, content: string }): Promise<string> {
         const fullPath = this.getSafePath(args.path);
-        if (!fullPath) {
-            return `[❌] 错误: 无效或越界的路径 | Error: Invalid or out-of-bounds path.`;
-        }
-
-        const confirm = await vscode.window.showWarningMessage(
-            `[✍️] Opengravity 请求写入/修改: ${args.path}. | OPGV wants to write/modify.`,
-            { modal: true },
-            'ACPT'
-        );
-
-        if (confirm !== 'ACPT') {
-            return "[❌] 操作被用户拒绝 | User denied write access.";
-        }
+        if (!fullPath) return `[❌] 错误: 无效或越界的路径。`;
 
         try {
             const dir = path.dirname(fullPath);
-            // 异步地递归创建目录
             await fs.mkdir(dir, { recursive: true });
-            // 异步写入文件
             await fs.writeFile(fullPath, args.content, 'utf-8');
-
-            // 自动打开文件
-            const doc = await vscode.workspace.openTextDocument(fullPath);
-            await vscode.window.showTextDocument(doc);
-
-            return "[✅] 文件已成功写入并打开 | File written and opened successfully.";
+            return "[✅] 文件已成功写入。";
         } catch (e: any) {
-            Logger.error(`Error writing file: ${e.message}`, e); // Log the error with Logger
-            return `[❌] 写入文件时发生错误 | Error writing file: ${e.message}`;
+            Logger.error(`Error writing file: ${e.message}`, e);
+            return `[❌] 写入文件时发生错误: ${e.message}`;
         }
     }
 
-    /**
-     * [安全警告] 此函数已被禁用
-     * 直接执行由AI生成的命令存在严重的安全风险。
-     * 请考虑使用更具体的、封装好的工具来替代它。
-     * 例如: `compile_c_file({path: 'main.c'})` 或 `list_directory({path: 'src/'})`
-     */
-    static async run_command(args: { command: string }): Promise<string> {
-        vscode.window.showErrorMessage("出于安全考虑，`run_command` 工具已被禁用。请使用更具体的工具。");
-        return "[❌] 安全错误: `run_command` 工具已被禁用。 | SECURITY ERROR: The `run_command` tool is disabled.";
+    static async replace(args: { path: string, old_string: string, new_string: string, instruction: string }): Promise<string> {
+        const fullPath = this.getSafePath(args.path);
+        if (!fullPath) return `[❌] 错误: 无效或越界的路径。`;
+
+        try {
+            const content = await fs.readFile(fullPath, 'utf-8');
+            const firstIndex = content.indexOf(args.old_string);
+            if (firstIndex === -1) return `[❌] 错误：在文件中未找到指定的旧代码片段。`;
+            if (content.lastIndexOf(args.old_string) !== firstIndex) return `[❌] 错误：找到了多个相同的代码片段。`;
+
+            const newContent = content.slice(0, firstIndex) + args.new_string + content.slice(firstIndex + args.old_string.length);
+            await vscode.commands.executeCommand('opengravity.showDiff', { originalUri: vscode.Uri.file(fullPath), newContent });
+            return `[✨] 已开启差异对比视图。请 Review 后点击“采纳”应用修改。`;
+        } catch (e: any) {
+            return `[❌] 触发修改失败: ${e.message}`;
+        }
     }
 }
