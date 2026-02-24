@@ -20,7 +20,8 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     private _historyManager: HistoryManager; // 使用 HistoryManager 管理内存状态
     private _chatHistoryService: ChatHistoryService; // 使用 ChatHistoryService 管理持久化
     private _pendingDiff?: { originalUri: vscode.Uri, newContent: string, diffUri: vscode.Uri }; // 挂起的 Diff
-    private _isWaitingForApproval = false; // [新增] 审批锁：防止递归循环
+    private _isWaitingForApproval = false; // 审批锁
+    private _isProcessing = false; // [新增] 全局处理锁：防止协议冲突
 
     constructor(
         private readonly _extensionUri: vscode.Uri,
@@ -36,9 +37,9 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     public async resolveWebviewView(webviewView: vscode.WebviewView) {
         this._view = webviewView;
         
-        // 替换旧的 loadSessionFromDisk() 逻辑
+        // 加载最后会话历史
         const lastSession = await this._chatHistoryService.loadCheckpoint('session_history');
-        if (lastSession) {
+        if (lastSession && lastSession.history) {
             this._historyManager.loadHistory(lastSession.history);
         }
 
@@ -48,15 +49,19 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         webviewView.webview.onDidReceiveMessage(async (data) => {
             switch (data.type) {
                 case 'webviewLoaded':
-                    // 使用 historyManager 获取数据
                     const currentHistory = this._historyManager.getHistory();
                     if (currentHistory.length > 0) {
                         this._postWebviewMessage('restoreHistory', currentHistory.filter(m => (m.role === 'user' || m.role === 'assistant') && m.content).map(m => ({ role: m.role === 'assistant' ? 'ai' : 'user', content: m.content || "" })));
                     }
                     break;
                 case 'userInput':
+                    if (this._isProcessing) return;
                     await this.handleUserMessage(data.value);
                     break;
+                case 'saveAndClear':
+                    await this.handleSaveAndClear();
+                    break;
+// ...
                 case 'linkActiveFile':
                     await this.handleLinkActiveFile();
                     break;
@@ -91,25 +96,26 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     public async handleApplyDiff() {
         if (this._pendingDiff) {
             try {
-                // 1. 执行写文件 (直接在 Provider 内处理，确保逻辑闭环)
+                // 1. 执行写文件
                 const encoder = new TextEncoder();
                 await vscode.workspace.fs.writeFile(this._pendingDiff.originalUri, encoder.encode(this._pendingDiff.newContent));
                 
-                // 2. 清理 Diff 视图状态并关闭编辑器
+                // 2. 清理状态
                 DiffContentProvider.clear(this._pendingDiff.diffUri);
                 await vscode.commands.executeCommand('workbench.action.closeActiveEditor');
                 
-                // 3. 解锁并清理 UI 状态
+                // 3. [关键修复] 更新历史记录中的 Tool 消息，而不是添加 User 消息
+                // 这保证了协议顺序：assistant (tool_calls) -> tool (SUCCESS) -> assistant
+                const successMsg = `[SUCCESS] User APPROVED and applied the changes to \`${path.basename(this._pendingDiff.originalUri.fsPath)}\`.`;
+                this._historyManager.updateLastMessage(successMsg);
+                
                 this._isWaitingForApproval = false;
                 vscode.commands.executeCommand('setContext', 'opengravity.diffVisible', false);
-                
-                const feedback = `[USER ACTION] The proposed changes to \`${path.basename(this._pendingDiff.originalUri.fsPath)}\` have been APPROVED and applied. Please proceed with the next task.`;
-                this._historyManager.addItem({ role: 'user', content: feedback });
-                
                 this._pendingDiff = undefined;
+
                 vscode.window.showInformationMessage('✅ 修改已应用。');
 
-                // 4. 触发 AI 自动执行下一步
+                // 4. 触发 AI 自动执行下一步 (此时 AI 会看到 SUCCESS 状态)
                 await this.handleUserMessage("", true);
             } catch (err: any) {
                 vscode.window.showErrorMessage(`应用修改失败: ${err.message}`);
@@ -125,13 +131,15 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
             DiffContentProvider.clear(this._pendingDiff.diffUri);
             await vscode.commands.executeCommand('workbench.action.closeActiveEditor');
             
+            // [关键修复] 更新 Tool 消息为 REJECTED
+            const rejectMsg = `[REJECTED] User declined the changes to \`${path.basename(this._pendingDiff.originalUri.fsPath)}\`.`;
+            this._historyManager.updateLastMessage(rejectMsg);
+
             this._isWaitingForApproval = false;
             vscode.commands.executeCommand('setContext', 'opengravity.diffVisible', false);
-            
-            const feedback = `[USER ACTION] The proposed changes to \`${path.basename(this._pendingDiff.originalUri.fsPath)}\` were REJECTED by the user. Please reconsider your approach.`;
-            this._historyManager.addItem({ role: 'user', content: feedback });
-            
             this._pendingDiff = undefined;
+
+            // 触发 AI 重新思考 (此时 AI 会看到 REJECTED 状态)
             await this.handleUserMessage("", true);
         }
     }
@@ -193,25 +201,29 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
             this._historyManager.addItem({ role: 'user', content });
         }
 
+        this._isProcessing = true; // 锁定输入
+
         try {
             this._postWebviewMessage('streamStart', undefined);
             const allTools = await this._getAvailableTools();
-            // 从 HistoryManager 获取数据
-            const aiResponse = await this._getAIResponse(provider, this._historyManager.getHistory(), allTools);
+            
+            // [关键修复] 获取经过协议自愈的历史记录，防止 400 错误
+            const sanitizedHistory = this._historyManager.getSanitizedHistory();
+            
+            const aiResponse = await this._getAIResponse(provider, sanitizedHistory, allTools);
 
             this._historyManager.addItem(aiResponse);
             this._postWebviewMessage('streamEnd', undefined);
             
-            // 自动保存当前进度（不重置 KV Cache）
+            // 自动保存当前进度
             await this._chatHistoryService.saveCheckpoint('session_history', this._historyManager.getHistory());
 
             if (aiResponse.tool_calls && aiResponse.tool_calls.length > 0) {
                 await this._executeToolCalls(aiResponse.tool_calls);
                 
-                // [关键修复] 检查是否正在等待用户审批。如果是，则中断递归。
+                // 检查是否正在等待用户审批。如果是，则中断递归。
                 if (this._isWaitingForApproval) {
                     Logger.info("[OPGV] Truncating auto-resume loop: Waiting for user approval on code changes.");
-                    // 激活编辑器标题栏按钮
                     vscode.commands.executeCommand('setContext', 'opengravity.diffVisible', true);
                     return; 
                 }
@@ -221,6 +233,8 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
             }
         } catch (err: any) { 
             this._handleProcessingError(err);
+        } finally {
+            this._isProcessing = false; // [关键修复] 无论成功失败，必须释放锁
         }
     }
 
