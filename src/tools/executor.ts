@@ -16,12 +16,22 @@ export class ToolExecutor {
 
     /**
      * 规范化并验证路径是否在工作区内。
+     * [安全修复] 使用 path.relative 彻底杜绝路径穿越漏洞。
      */
-    private static getSafePath(relativePath: string): string | undefined {
+    private static getSafePath(relativePath: string): string {
         const rootPath = this.getRootPath();
-        if (!rootPath) return undefined;
-        const absolutePath = path.normalize(path.join(rootPath, relativePath));
-        if (!absolutePath.startsWith(rootPath)) return undefined;
+        if (!rootPath) {
+            throw new Error("SECURITY ERROR: No workspace folder opened.");
+        }
+
+        const absolutePath = path.resolve(rootPath, relativePath);
+        const relative = path.relative(rootPath, absolutePath);
+
+        // 如果相对路径以 .. 开头，或者它是绝对路径（表示试图跨盘符或逃逸根目录）
+        if (relative.startsWith('..') || path.isAbsolute(relative)) {
+            throw new Error(`SECURITY VIOLATION: Access denied to path outside workspace: ${absolutePath}`);
+        }
+
         return absolutePath;
     }
 
@@ -34,15 +44,26 @@ export class ToolExecutor {
         const rootPath = this.getRootPath();
         if (!rootPath) return "[❌] Error: No workspace folder opened.";
 
-        // [安全校验]
-        const dangerousCommands = ['rm -rf /', 'sudo ', ':(){ :|:& };:'];
-        if (dangerousCommands.some(cmd => args.command.includes(cmd))) {
-            return `[❌] SECURITY ALERT: Command "${args.command}" is prohibited.`;
+        // [安全加固] 扩展危险指令黑名单
+        const dangerousPatterns = [
+            'rm -rf /', 'sudo ', ':(){ :|:& };:', 
+            '> /dev/sda', 'mkfs.', 'dd if=', 
+            'curl http', 'wget http', // 简单防止下载执行
+            'sh ', 'bash ', 'python -c', 'perl -e' // 防止二级脚本执行
+        ];
+        
+        if (dangerousPatterns.some(p => args.command.includes(p))) {
+            return `[❌] SECURITY ALERT: Command contains prohibited patterns.`;
         }
 
-        // [模态确认]
+        // [意图检测] 检查是否包含命令拼接或重定向，增加警示权重
+        const hasMetaChars = /[;&|>]/.test(args.command);
+        const warningIcon = hasMetaChars ? "🔴 [CRITICAL WARNING]" : "⚠️ [ACTION REQUIRED]";
+        const metaWarning = hasMetaChars ? "\n\n检测到命令拼接或重定向符号，请务必核实执行逻辑！" : "";
+
+        // [模态确认] 强制要求人类审批
         const confirm = await vscode.window.showWarningMessage(
-            `[⚠️] AI 请求运行命令: \`${args.command}\``,
+            `${warningIcon} AI 请求运行命令:\n\n\`${args.command}\`${metaWarning}`,
             { modal: true },
             '确认执行 (RUN)', '拒绝 (DENY)'
         );
@@ -52,14 +73,12 @@ export class ToolExecutor {
         }
 
         return new Promise((resolve) => {
-            // [修复] 简化 Spawn 调用，移除显式 Shell 嵌套
-            // Node.js 的 { shell: true } 会自动处理跨平台兼容性
             const env = Object.assign({}, process.env, { OPENGRAVITY: "1" });
 
             const child = cp.spawn(args.command, {
                 cwd: rootPath,
                 env: env,
-                shell: true
+                shell: true // 保持 shell: true 以支持正常工程命令，但通过强力 UI 确认闭环
             });
 
             let stdoutBuf = "";

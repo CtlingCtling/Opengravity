@@ -86,12 +86,16 @@ export class HistoryManager {
     }
 
     /**
-     * 更新最后一条消息的内容。
-     * 用于在用户采纳/拒绝后，修改 Tool 消息的状态。
+     * 精准更新工具执行结果。
+     * 根据 tool_call_id 定位历史记录中的消息并更新其内容。
      */
-    updateLastMessage(content: string) {
-        if (this._history.length > 0) {
-            this._history[this._history.length - 1].content = content;
+    updateToolResult(toolCallId: string, content: string) {
+        const index = this._history.findIndex(m => m.role === 'tool' && m.tool_call_id === toolCallId);
+        if (index !== -1) {
+            this._history[index].content = content;
+        } else {
+            // 如果没找到（可能尚未添加），记录警告
+            console.warn(`[HistoryManager] Failed to find tool message with id: ${toolCallId}`);
         }
     }
 }

@@ -62,7 +62,7 @@ describe('ChatViewProvider 集成测试 (架构对齐版)', () => {
 
         provider = new ChatViewProvider(
             { fsPath: '/mock/extension' } as any,
-            () => mockAIProvider,
+            async () => mockAIProvider,
             mockMcpHost,
             "System Prompt Base"
         );

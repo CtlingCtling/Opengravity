@@ -45,7 +45,7 @@ export class McpHost {
     private isInitialized = false;
 
     private static readonly ALLOWED_MCP_COMMANDS = ['npx', 'node', 'uv', 'python', 'python3']; 
-    private static readonly SAFE_ARG_REGEX = /^[\w\s\-\.\/\=\\:]+$/; 
+    private static readonly SAFE_ARG_REGEX = /^[\w\s\-\.\/\=\\:@]+$/; 
 
     private validateMcpCommand(command: string, args: string[]): void {
         if (!McpHost.ALLOWED_MCP_COMMANDS.includes(command)) {

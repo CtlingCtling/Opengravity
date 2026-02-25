@@ -53,12 +53,13 @@ function appendMessage(role, text = "") {
         <div class="role-label">${role === 'user' ? 'USER' : 'OPENGRAVITY'}</div>
         <div class="reasoning"></div>
         <div class="content"></div>
-        <!-- 重点：隔离区域，不被 innerHTML 覆盖 -->
+        <!-- 隔离区域 -->
         <div class="attachments"></div>
     `;
 
     const contentDiv = msgDiv.querySelector('.content');
     if (text) {
+        // [安全修复] 即使是 User 消息也通过 DOMPurify 过滤，或者保持 escapeHtml
         contentDiv.innerHTML = role === 'user' ? escapeHtml(text) : safeParseMarkdown(text);
     }
 
@@ -74,9 +75,17 @@ function appendMessage(role, text = "") {
 
 function safeParseMarkdown(text) {
     try {
-        return marked.parse(text);
+        const rawHtml = marked.parse(text);
+        // [安全修复] 增加 DOMPurify 是否存在的检查
+        if (typeof DOMPurify !== 'undefined') {
+            return DOMPurify.sanitize(rawHtml);
+        }
+        console.warn("DOMPurify not found, rendering raw markdown (XSS Risk!)");
+        return rawHtml;
     } catch (e) {
-        return text.replace(/\n/g, '<br>');
+        console.error("Markdown parse error:", e);
+        const fallback = text.replace(/\n/g, '<br>');
+        return (typeof DOMPurify !== 'undefined') ? DOMPurify.sanitize(fallback) : fallback;
     }
 }
 

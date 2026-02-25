@@ -1,36 +1,39 @@
 import * as vscode from 'vscode';
-import * as fs from 'fs';
 import * as path from 'path';
 import { Logger } from './logger';
 
 export class TemplateManager {
     private static readonly REF_REGEX = /(?<!\\)@\{([^}]+)\}/g;
+    private static readonly MAX_RECURSION_DEPTH = 10; // [修复] 限制递归深度，防止递归炸弹
 
     /**
      * 加载模板：优先从工作区 .opengravity/ 加载，若无则从插件 assets/templates 加载
      */
     static async loadTemplate(extensionUri: vscode.Uri, templatePath: string): Promise<string> {
-        const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+        const root = vscode.workspace.workspaceFolders?.[0]?.uri;
         if (root) {
-            const userTemplatePath = path.join(root, '.opengravity', templatePath);
+            const userTemplateUri = vscode.Uri.joinPath(root, '.opengravity', templatePath);
             try {
-                if (fs.existsSync(userTemplatePath)) {
-                    return await fs.promises.readFile(userTemplatePath, 'utf8');
-                }
-            } catch (e) {}
+                const content = await vscode.workspace.fs.readFile(userTemplateUri);
+                return new TextDecoder().decode(content);
+            } catch (e) {
+                // 文件不存在，继续回退
+            }
         }
 
         // Fallback to internal assets
-        const internalPath = path.join(extensionUri.fsPath, 'assets', 'templates', templatePath);
-        return await fs.promises.readFile(internalPath, 'utf8');
+        const internalUri = vscode.Uri.joinPath(extensionUri, 'assets', 'templates', templatePath);
+        const internalContent = await vscode.workspace.fs.readFile(internalUri);
+        return new TextDecoder().decode(internalContent);
     }
 
     /**
      * 加载插件内部原始模板 (用于部署拷贝)
      */
     static async loadInternalTemplate(extensionUri: vscode.Uri, templateName: string): Promise<string> {
-        const internalPath = path.join(extensionUri.fsPath, 'assets', 'templates', templateName);
-        return await fs.promises.readFile(internalPath, 'utf8');
+        const internalUri = vscode.Uri.joinPath(extensionUri, 'assets', 'templates', templateName);
+        const content = await vscode.workspace.fs.readFile(internalUri);
+        return new TextDecoder().decode(content);
     }
 
     /**
@@ -52,12 +55,16 @@ export class TemplateManager {
         });
 
         // 3. 处理递归文件引用 @{path}
-        result = await this.resolveReferences(result, new Set<string>());
+        result = await this.resolveReferences(result, new Set<string>(), 0);
 
         return result;
     }
 
-    private static async resolveReferences(content: string, visited: Set<string>): Promise<string> {
+    private static async resolveReferences(content: string, visited: Set<string>, depth: number): Promise<string> {
+        if (depth > this.MAX_RECURSION_DEPTH) {
+            return "[Error: Maximum recursion depth exceeded]";
+        }
+
         const rootPath = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
         if (!rootPath) return content;
 
@@ -69,12 +76,17 @@ export class TemplateManager {
             const [tag, relPath] = match;
             const absPath = path.normalize(path.join(rootPath, relPath));
 
+            // 安全检查：防止路径穿越
             if (!absPath.startsWith(rootPath) || visited.has(absPath)) continue;
 
             try {
                 visited.add(absPath);
-                let fileContent = await fs.promises.readFile(absPath, 'utf-8');
-                fileContent = await this.resolveReferences(fileContent, visited);
+                const fileUri = vscode.Uri.file(absPath);
+                const rawContent = await vscode.workspace.fs.readFile(fileUri);
+                let fileContent = new TextDecoder().decode(rawContent);
+                
+                // 递归解析，增加深度计数
+                fileContent = await this.resolveReferences(fileContent, visited, depth + 1);
                 processed = processed.replace(tag, fileContent);
             } catch (e) {
                 processed = processed.replace(tag, `[Error: ${relPath}]`);
@@ -89,8 +101,11 @@ export class TemplateManager {
     static async getSystemPrompt(extensionUri: vscode.Uri): Promise<string> {
         const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
         if (workspaceFolder) {
-            const userPath = path.join(workspaceFolder.uri.fsPath, '.opengravity', 'SYSTEM.md');
-            if (fs.existsSync(userPath)) return await fs.promises.readFile(userPath, 'utf8');
+            const userUri = vscode.Uri.joinPath(workspaceFolder.uri, '.opengravity', 'SYSTEM.md');
+            try {
+                const content = await vscode.workspace.fs.readFile(userUri);
+                return new TextDecoder().decode(content);
+            } catch (e) {}
         }
         return this.loadInternalTemplate(extensionUri, 'SYSTEM.md');
     }
@@ -106,22 +121,27 @@ export class TemplateManager {
         const configDirUri = vscode.Uri.joinPath(rootUri, '.opengravity');
 
         try {
-            // 1. 确保基础子目录存在
+            // 1. 确保基础子目录存在 (异步)
             const baseDirs = ['skills', 'agents', 'codingstyle', 'commands', 'sessions', 'commands_prompt'];
             for (const dir of baseDirs) {
-                await vscode.workspace.fs.createDirectory(vscode.Uri.joinPath(configDirUri, dir));
+                const dirUri = vscode.Uri.joinPath(configDirUri, dir);
+                try {
+                    await vscode.workspace.fs.stat(dirUri);
+                } catch (e) {
+                    await vscode.workspace.fs.createDirectory(dirUri);
+                }
             }
 
-            // 2. 将 assets/templates 内容镜像同步到 .opengravity/ 根部 (核心修正)
+            // 2. 将 assets/templates 内容镜像同步到 .opengravity/ 根部
             await this.syncDir(
-                path.join(extensionUri.fsPath, 'assets', 'templates'),
+                vscode.Uri.joinPath(extensionUri, 'assets', 'templates'),
                 configDirUri,
                 "Config Assets"
             );
 
             // 3. 将 assets/commands (TOML) 同步到 .opengravity/commands/
             await this.syncDir(
-                path.join(extensionUri.fsPath, 'assets', 'commands'),
+                vscode.Uri.joinPath(extensionUri, 'assets', 'commands'),
                 vscode.Uri.joinPath(configDirUri, 'commands'),
                 "Instructions"
             );
@@ -133,28 +153,33 @@ export class TemplateManager {
 
     /**
      * 通用的目录同步工具
+     * [修复] 仅在文件不存在时进行拷贝，保护用户的自定义修改。
      */
-    private static async syncDir(srcDir: string, destUri: vscode.Uri, label: string) {
-        const copyRecursive = async (src: string, dest: vscode.Uri) => {
-            if (!fs.existsSync(src)) return;
-            const entries = await fs.promises.readdir(src, { withFileTypes: true });
-            for (const entry of entries) {
-                const srcPath = path.join(src, entry.name);
-                const destFileUri = vscode.Uri.joinPath(dest, entry.name);
+    private static async syncDir(srcUri: vscode.Uri, destUri: vscode.Uri, label: string) {
+        const copyRecursive = async (src: vscode.Uri, dest: vscode.Uri) => {
+            const entries = await vscode.workspace.fs.readDirectory(src);
+            for (const [name, type] of entries) {
+                const sUri = vscode.Uri.joinPath(src, name);
+                const dUri = vscode.Uri.joinPath(dest, name);
 
-                if (entry.isDirectory()) {
-                    await vscode.workspace.fs.createDirectory(destFileUri);
-                    await copyRecursive(srcPath, destFileUri);
+                if (type === vscode.FileType.Directory) {
+                    try { await vscode.workspace.fs.stat(dUri); } catch (e) {
+                        await vscode.workspace.fs.createDirectory(dUri);
+                    }
+                    await copyRecursive(sUri, dUri);
                 } else {
-                    // 如果文件已存在，仅在内容不同时覆盖（防止不必要的磁盘操作）
-                    const content = await fs.promises.readFile(srcPath);
-                    await vscode.workspace.fs.writeFile(destFileUri, content);
+                    // 核心逻辑：如果目标文件已存在，则跳过，不覆盖用户修改
+                    try {
+                        await vscode.workspace.fs.stat(dUri);
+                    } catch (e) {
+                        await vscode.workspace.fs.copy(sUri, dUri, { overwrite: false });
+                    }
                 }
             }
         };
 
         try {
-            await copyRecursive(srcDir, destUri);
+            await copyRecursive(srcUri, destUri);
             Logger.info(`[OPGV] ${label} synchronized to .opengravity/`);
         } catch (e: any) {
             Logger.error(`[OPGV] Sync ${label} failed: ${e.message}`);

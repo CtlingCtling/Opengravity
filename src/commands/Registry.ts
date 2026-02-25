@@ -1,6 +1,4 @@
 import * as vscode from 'vscode';
-import * as fs from 'fs';
-import * as path from 'path';
 import * as toml from 'toml';
 import { ICommand } from './ICommand';
 import { ClearCommand } from './slash/clear';
@@ -48,40 +46,47 @@ export class CommandRegistry {
 
     /**
      * 核心加载逻辑：全量扫描配置指令
+     * [修复] 优先工作区，Fallback 到内置，杜绝重复加载。
      */
     async loadAllCommands() {
-        // 1. 加载插件内置的默认指令 (e.g. /help, /about)
-        const assetDir = path.join(this.extensionUri.fsPath, 'assets', 'commands');
-        await this.scanDir(assetDir, true);
+        const assetUri = vscode.Uri.joinPath(this.extensionUri, 'assets', 'commands');
+        const root = vscode.workspace.workspaceFolders?.[0]?.uri;
+        const workspaceUri = root ? vscode.Uri.joinPath(root, '.opengravity', 'commands') : undefined;
 
-        // 2. 加载工作区的自定义指令 (可覆盖内置)
-        const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-        if (root) {
-            const workspaceDir = path.join(root, '.opengravity', 'commands');
-            await this.scanDir(workspaceDir, false);
-        }
-    }
+        const commandMap = new Map<string, vscode.Uri>();
 
-    private async scanDir(dir: string, isInternal: boolean) {
+        // 1. 先收集内置指令
         try {
-            if (!fs.existsSync(dir)) {
-                if (!isInternal) await fs.promises.mkdir(dir, { recursive: true });
-                return;
-            }
-            const entries = await fs.promises.readdir(dir, { withFileTypes: true });
-            for (const entry of entries) {
-                if (entry.name.endsWith('.toml')) {
-                    await this.loadSingleTOML(path.join(dir, entry.name));
+            const assetEntries = await vscode.workspace.fs.readDirectory(assetUri);
+            for (const [name, type] of assetEntries) {
+                if (type === vscode.FileType.File && name.endsWith('.toml')) {
+                    commandMap.set(name, vscode.Uri.joinPath(assetUri, name));
                 }
             }
-        } catch (error) {
-            Logger.error(`[OPGV] Failed to scan dir ${dir}:`, error);
+        } catch (e) {}
+
+        // 2. 收集并覆盖工作区指令 (如果有)
+        if (workspaceUri) {
+            try {
+                const workspaceEntries = await vscode.workspace.fs.readDirectory(workspaceUri);
+                for (const [name, type] of workspaceEntries) {
+                    if (type === vscode.FileType.File && name.endsWith('.toml')) {
+                        commandMap.set(name, vscode.Uri.joinPath(workspaceUri, name));
+                    }
+                }
+            } catch (e) {}
+        }
+
+        // 3. 统一加载
+        for (const [filename, uri] of commandMap) {
+            await this.loadSingleTOML(uri);
         }
     }
 
-    private async loadSingleTOML(filePath: string) {
+    private async loadSingleTOML(uri: vscode.Uri) {
         try {
-            const content = await fs.promises.readFile(filePath, 'utf-8');
+            const rawContent = await vscode.workspace.fs.readFile(uri);
+            const content = new TextDecoder().decode(rawContent);
             const data = toml.parse(content);
             const config = data.command || data;
             const commandName = config.name.toLowerCase();
@@ -98,9 +103,9 @@ export class CommandRegistry {
                 config.prompt
             );
             this.register(dynamicCmd);
-            Logger.info(`[OPGV] Loaded ${commandName} from ${path.basename(filePath)}`);
+            Logger.info(`[OPGV] Loaded ${commandName} from ${uri.fsPath}`);
         } catch (error) {
-            Logger.error(`[OPGV] TOML Error at ${filePath}:`, error);
+            Logger.error(`[OPGV] TOML Error at ${uri.fsPath}:`, error);
         }
     }
 
