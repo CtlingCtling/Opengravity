@@ -23,13 +23,15 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     private _pendingDiff?: { originalUri: vscode.Uri, newContent: string, diffUri: vscode.Uri }; // 挂起的 Diff
     private _isWaitingForApproval = false; // 审批锁
     private _isProcessing = false; // [新增] 全局处理锁：防止协议冲突
+    private _systemPrompt: string;
 
     constructor(
         private readonly _extensionUri: vscode.Uri,
         private readonly _getAIProvider: () => AIProvider | null,
         private readonly _mcpHost: McpHost,
-        private readonly _systemPrompt: string
+        systemPrompt: string
     ) {
+        this._systemPrompt = systemPrompt;
         this._commandDispatcher = new CommandDispatcher(this._extensionUri);
         this._historyManager = new HistoryManager(); // 初始化内存状态
         this._chatHistoryService = new ChatHistoryService(); // 初始化持久化服务
@@ -254,20 +256,19 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
      * 外部接口：强制刷新系统提示词（用于 /memory refresh）
      */
     public async refreshSystemPrompt() {
+        // 1. 彻底清空内存历史
         this._historyManager.clearHistory();
         
-        // [关键修复] 重新从磁盘读取最新的系统提示词
-        const freshSystemPrompt = await TemplateManager.getSystemPrompt(this._extensionUri);
+        // 2. 重新从磁盘读取最新的系统提示词模板
+        this._systemPrompt = await TemplateManager.getSystemPrompt(this._extensionUri);
         
-        // 重新注入系统消息
-        this._historyManager.addItem({ role: 'system', content: freshSystemPrompt });
-        
-        // 重新注入 MCP 扩展上下文
+        // 3. 依靠 handleUserMessage 中的逻辑或在此手动触发一次合成
         await this._ensureSystemPrompt(); 
 
+        // 4. 同步持久化与 UI
         await this._chatHistoryService.saveCheckpoint('session_history', this._historyManager.getHistory());
         this._postWebviewMessage('clearView', undefined);
-        this._postWebviewMessage('restoreHistory', [{ role: 'ai', content: '✅ **系统记忆已刷新**\n\n已重新加载 SYSTEM.md 和 MCP 协议上下文。' }]);
+        this._postWebviewMessage('restoreHistory', [{ role: 'ai', content: '✅ **系统记忆已刷新**\n\n已重新加载最新的 SYSTEM.md 和 MCP 协议上下文。' }]);
     }
 
     private async handleLinkActiveFile() {
