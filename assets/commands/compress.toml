@@ -1,0 +1,10 @@
+[command]
+name = "compress"
+description = "折叠当前会话以节省 Token。AI 将生成对话摘要并替换历史。"
+prompt = """
+请对以上对话进行精简总结。要求：
+1. 保留已达成的关键决策和技术路径。
+2. 记录当前待办任务 (TODO) 或未解决的问题。
+3. 移除重复的调试过程和冗长的中间代码。
+请以『[CONVERSATION SUMMARY]』作为开头。
+"""

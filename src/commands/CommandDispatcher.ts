@@ -6,30 +6,21 @@ import * as vscode from 'vscode';
 import { Logger } from '../utils/logger';
 import { AtHandler } from './at/AtHandler';
 import { ShellHandler } from './shell/ShellHandler';
-import { HistoryManager } from '../session/HistoryManager'; // 引入 HistoryManager
-import { ChatHistoryService } from '../services/ChatHistoryService'; // 引入 ChatHistoryService
+import { HistoryManager } from '../session/HistoryManager';
+import { ChatHistoryService } from '../services/ChatHistoryService';
 
 export class CommandDispatcher {
     private registry: CommandRegistry;
 
-    constructor() {
-        this.registry = new CommandRegistry();
-        // 异步启动加载
-        this.registry.loadCustomCommands().then(() => {
-            Logger.info('[OPGV] Custom commands loaded into registry.');
+    constructor(extensionUri: vscode.Uri) {
+        this.registry = new CommandRegistry(extensionUri);
+        this.registry.loadAllCommands().then(() => {
+            Logger.info('[OPGV] Registry initialized with system and workspace assets.');
         });
     }
 
-    /**
-     * 重新加载指令
-     */
-    async reload() {
-        await this.registry.reload();
-    }
+    async reload() { await this.registry.reload(); }
 
-    /**
-     * 核心分发逻辑
-     */
     async dispatch(
         text: string, 
         ai: AIProvider, 
@@ -39,66 +30,51 @@ export class CommandDispatcher {
         onInjectMessage: (content: string) => Promise<void>,
         historyManager: HistoryManager,
         chatHistoryService: ChatHistoryService,
-        chatViewProvider: any // 新增
+        chatViewProvider: any
     ): Promise<CommandResult | null> {
-        const trimmedText = text.trim();
+        const trimmed = text.trim();
+        if (!trimmed) return null;
 
         const context: CommandContext = {
-            ai,
-            mcp,
-            webview,
-            extensionUri,
+            ai, mcp, webview, extensionUri,
             registry: this.registry,
             onInjectMessage,
             historyManager,
             chatHistoryService,
-            chatViewProvider // 注入
+            chatViewProvider
         };
 
-        // 1. 处理 Slash Commands (/)
-        if (trimmedText.startsWith('/')) {
-            Logger.info(`[OPGV] Command detected: ${trimmedText}`);
-            const result = await this.handleSlashCommand(trimmedText, context);
-            Logger.info(`[OPGV] Command execution result: ${result.status}`);
-            return result;
+        // 1. Slash Command (/)
+        if (trimmed.startsWith('/')) {
+            return await this.handleSlash(trimmed, context);
         }
 
-        // 2. 处理 At Commands (@)
-        // 使用高级正则捕获：支持 @path 或 @"path with spaces"
-        const atRegex = /^@(?:"([^"]+)"|(\S+))/;
-        const atMatch = trimmedText.match(atRegex);
-        
-        if (atMatch) {
-            const capturedPath = atMatch[1] || atMatch[2];
-            Logger.info(`[OPGV] Context shortcut detected: ${capturedPath}`);
-            return await AtHandler.handle(capturedPath, context);
+        // 2. Context Command (@)
+        if (trimmed.startsWith('@')) {
+            const path = trimmed.slice(1).replace(/^"(.*)"$/, '$1'); // 支持引号路径
+            return await AtHandler.handle(path, context);
         }
 
-        // 3. 处理 Shell Commands (!)
-        if (trimmedText.startsWith('!')) {
-            Logger.info(`[OPGV] Shell bridge detected: ${trimmedText}`);
-            return await ShellHandler.handle(trimmedText, context);
+        // 3. Shell Command (!)
+        if (trimmed.startsWith('!')) {
+            return await ShellHandler.handle(trimmed, context);
         }
 
         return null;
     }
 
-    private async handleSlashCommand(text: string, context: CommandContext): Promise<CommandResult> {
-        const parts = text.slice(1).split(/\s+/);
-        const commandName = parts[0].toLowerCase();
-        const args = parts.slice(1);
+    private async handleSlash(text: string, context: CommandContext): Promise<CommandResult> {
+        const [rawName, ...args] = text.slice(1).split(/\s+/);
+        const name = rawName.toLowerCase();
+        const command = this.registry.getCommand(name);
 
-        const command = this.registry.getCommand(commandName);
         if (command) {
             try {
                 return await command.execute(args, context);
-            } catch (error: any) {
-                Logger.error(`[OPGV] Command execution failed: ${error.message}`);
-                return { status: 'error', message: `执行指令失败: ${error.message}` };
+            } catch (e: any) {
+                return { status: 'error', message: `指令 /${name} 执行失败: ${e.message}` };
             }
         }
-
-        Logger.warn(`[OPGV] Unknown command: /${commandName}`);
-        return { status: 'error', message: `未知的指令: /${commandName}` };
+        return { status: 'error', message: `未找到指令: /${name}` };
     }
 }

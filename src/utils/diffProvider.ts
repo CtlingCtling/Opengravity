@@ -3,7 +3,7 @@ import * as vscode from 'vscode';
 /**
  * DiffContentProvider: 虚拟文档内容提供者
  * 用于在 VSCode 的 Diff 视图右侧展示 AI 修改后的内容。
- * 借鉴 gemini-cli 的虚拟文档机制。
+ * 借鉴 opengravity-logic 的虚拟文档机制。
  */
 export class DiffContentProvider implements vscode.TextDocumentContentProvider {
     public static readonly scheme = 'opengravity-diff';

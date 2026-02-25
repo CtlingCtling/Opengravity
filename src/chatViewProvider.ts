@@ -10,6 +10,7 @@ import { CommandDispatcher } from './commands/CommandDispatcher';
 import { HistoryManager } from './session/HistoryManager'; // 引入 HistoryManager
 import { ChatHistoryService } from './services/ChatHistoryService'; // 引入 ChatHistoryService
 import { DiffContentProvider } from './utils/diffProvider';
+import { TemplateManager } from './utils/templateManager';
 
 export class ChatViewProvider implements vscode.WebviewViewProvider {
     public static readonly viewType = 'opengravity.chatView';
@@ -29,7 +30,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         private readonly _mcpHost: McpHost,
         private readonly _systemPrompt: string
     ) {
-        this._commandDispatcher = new CommandDispatcher();
+        this._commandDispatcher = new CommandDispatcher(this._extensionUri);
         this._historyManager = new HistoryManager(); // 初始化内存状态
         this._chatHistoryService = new ChatHistoryService(); // 初始化持久化服务
     }
@@ -254,10 +255,19 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
      */
     public async refreshSystemPrompt() {
         this._historyManager.clearHistory();
-        await this._ensureSystemPrompt();
+        
+        // [关键修复] 重新从磁盘读取最新的系统提示词
+        const freshSystemPrompt = await TemplateManager.getSystemPrompt(this._extensionUri);
+        
+        // 重新注入系统消息
+        this._historyManager.addItem({ role: 'system', content: freshSystemPrompt });
+        
+        // 重新注入 MCP 扩展上下文
+        await this._ensureSystemPrompt(); 
+
         await this._chatHistoryService.saveCheckpoint('session_history', this._historyManager.getHistory());
         this._postWebviewMessage('clearView', undefined);
-        this._postWebviewMessage('restoreHistory', [{ role: 'ai', content: '✅ **系统记忆已刷新**\n\n已重新加载 GEMINI.md 和 MCP 协议上下文。' }]);
+        this._postWebviewMessage('restoreHistory', [{ role: 'ai', content: '✅ **系统记忆已刷新**\n\n已重新加载 SYSTEM.md 和 MCP 协议上下文。' }]);
     }
 
     private async handleLinkActiveFile() {

@@ -116,7 +116,7 @@ function getOrCreateTerminal(msgObj) {
         termBlock.className = 'terminal-block';
         termBlock.innerHTML = `
             <div class="terminal-header">
-                <span>Console</span>
+                <span>Terminal</span>
                 <div class="term-status"><div class="status-indicator running"></div></div>
             </div>
             <div class="terminal-body"></div>

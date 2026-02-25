@@ -1,0 +1,12 @@
+[command]
+name = "about"
+description = "关于 Opengravity"
+prompt = """
+请向用户介绍 Opengravity：
+- 它是一个集成于 VSCodium 的先进 AI 工作流平台。
+- 核心理念："氛围编程" (Ambient Programming) —— 让 AI 深度感知项目脉络。
+- 当前版本：0.0.1 (Experimental)
+- 开发者：Ctling
+
+用简洁、优雅且富有奉献精神的语气进行描述。
+"""

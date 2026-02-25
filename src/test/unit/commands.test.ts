@@ -46,7 +46,7 @@ describe('指令系统集成测试', () => {
 
     beforeEach(() => {
         jest.clearAllMocks();
-        dispatcher = new CommandDispatcher();
+        dispatcher = new CommandDispatcher({ fsPath: '/mock/ext' } as any);
         mockContext = {
             onInjectMessage: jest.fn(),
             webview: { postMessage: jest.fn() }

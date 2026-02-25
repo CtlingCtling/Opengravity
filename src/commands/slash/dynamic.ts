@@ -1,8 +1,9 @@
 import { ICommand, CommandContext, CommandResult } from '../ICommand';
-import { SkillLoader } from '../utils/SkillLoader';
+import { TemplateManager } from '../../utils/templateManager';
 
 /**
- * 动态指令类：用于承载从 TOML 文件加载的自定义技能
+ * DynamicTOMLCommand: 用于承载从 TOML 文件加载的自定义技能
+ * 逻辑已切换到统一的 TemplateManager 渲染引擎
  */
 export class DynamicTOMLCommand implements ICommand {
     constructor(
@@ -12,12 +13,19 @@ export class DynamicTOMLCommand implements ICommand {
     ) {}
 
     async execute(args: string[], context: CommandContext): Promise<CommandResult> {
-        // 调用 SkillLoader 进行深度提示词合成（处理引用和参数）
-        const finalPrompt = await SkillLoader.synthesize(this.promptTemplate, args);
+        try {
+            // 使用统一引擎合成最终 Prompt
+            const finalPrompt = await TemplateManager.render(this.promptTemplate, {
+                args: args.join(' '),
+                input: args.join(' ')
+            });
 
-        // 通过回调将合成后的 Prompt 注入对话流，触发 AI 回复
-        await context.onInjectMessage(finalPrompt);
+            // 通过回调将合成后的 Prompt 注入对话流，触发 AI 回复
+            await context.onInjectMessage(finalPrompt);
 
-        return { status: 'intercepted' }; // 标记为拦截并消费
+            return { status: 'intercepted' };
+        } catch (error: any) {
+            return { status: 'error', message: `合成指令失败: ${error.message}` };
+        }
     }
 }

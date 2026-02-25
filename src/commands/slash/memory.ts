@@ -2,10 +2,10 @@ import { ICommand, CommandContext, CommandResult } from '../ICommand';
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
+import { TemplateManager } from '../../utils/templateManager';
 
 /**
- * MemoryCommand: 长期记忆管理指令
- * 操作 .opengravity/GEMINI.md 文件，管理 AI 的系统上下文
+ * MemoryCommand: 长期记忆管理指令 (Kernel)
  */
 export class MemoryCommand implements ICommand {
     name = 'memory';
@@ -13,84 +13,70 @@ export class MemoryCommand implements ICommand {
 
     async execute(args: string[], context: CommandContext): Promise<CommandResult> {
         const subCommand = args[0]?.toLowerCase();
-
         switch (subCommand) {
-            case 'show':
-                return await this.handleShow(context);
-            case 'add':
-                return await this.handleAdd(args.slice(1), context);
-            case 'refresh':
-                return await this.handleRefresh(context);
-            default:
-                return { status: 'error', message: '请指定子命令: /memory [show|add|refresh]' };
+            case 'show': return await this.handleShow(context);
+            case 'add': return await this.handleAdd(args.slice(1), context);
+            case 'refresh': return await this.handleRefresh(context);
+            default: return { status: 'error', message: '子命令: /memory [show|add|refresh]' };
         }
     }
 
     private async handleShow(context: CommandContext): Promise<CommandResult> {
-        const geminiPath = this.getGeminiPath();
-        if (!geminiPath) return { status: 'error', message: '❌ 未找到工作区。' };
+        const systemPath = this.getSystemMdPath();
+        if (!systemPath) return { status: 'error', message: '❌ 未找到工作区。' };
 
         try {
-            const content = await fs.promises.readFile(geminiPath, 'utf-8');
-            const msg = [
-                "### 🧠 当前项目记忆 (GEMINI.md)",
-                "",
-                "```markdown",
-                content,
-                "```"
-            ].join('\n');
+            const content = await fs.promises.readFile(systemPath, 'utf-8');
+            const rawTemplate = await TemplateManager.loadTemplate(context.extensionUri, 'commands_prompt/memory_view.md');
+            const msg = await TemplateManager.render(rawTemplate, { content });
 
-            await context.webview.postMessage({
-                type: 'aiResponse',
-                value: msg
-            });
+            await context.webview.postMessage({ type: 'aiResponse', value: msg });
             return { status: 'success' };
         } catch (e) {
-            return { status: 'error', message: '❌ 无法读取 GEMINI.md，请先运行 `/init`。' };
+            return { status: 'error', message: '❌ 无法读取 SYSTEM.md' };
         }
     }
 
     private async handleAdd(args: string[], context: CommandContext): Promise<CommandResult> {
         const text = args.join(' ');
-        if (!text) return { status: 'error', message: '请输入要添加的记忆内容: /memory add <text>' };
+        if (!text) return { status: 'error', message: '内容缺失: /memory add <text>' };
 
-        const geminiPath = this.getGeminiPath();
-        if (!geminiPath) return { status: 'error', message: '❌ 未找到工作区。' };
+        const systemPath = this.getSystemMdPath();
+        if (!systemPath) return { status: 'error', message: '❌ 未找到工作区。' };
 
         try {
-            let content = await fs.promises.readFile(geminiPath, 'utf-8');
+            let content = await fs.promises.readFile(systemPath, 'utf-8');
             const memorySection = '## 🧠 开发约定 (Memories)';
-            
-            if (content.includes(memorySection)) {
-                content = content.replace(memorySection, `${memorySection}\n- ${text}`);
-            } else {
-                content += `\n\n${memorySection}\n- ${text}`;
-            }
+            content = content.includes(memorySection) ? content.replace(memorySection, `${memorySection}\n- ${text}`) : content + `\n\n${memorySection}\n- ${text}`;
 
-            await fs.promises.writeFile(geminiPath, content, 'utf-8');
-            
-            // 自动刷新
-            if (context.chatViewProvider && context.chatViewProvider.refreshSystemPrompt) {
-                await context.chatViewProvider.refreshSystemPrompt();
-            }
+            await fs.promises.writeFile(systemPath, content, 'utf-8');
+            if (context.chatViewProvider?.refreshSystemPrompt) await context.chatViewProvider.refreshSystemPrompt();
 
-            return { status: 'success', message: `✅ 记忆已添加并同步：\n> ${text}` };
+            return { status: 'success', message: `✅ 记忆已添加：\n> ${text}` };
         } catch (e) {
-            return { status: 'error', message: '❌ 添加记忆失败，请检查 GEMINI.md 是否存在。' };
+            return { status: 'error', message: '❌ 添加失败' };
         }
     }
 
     private async handleRefresh(context: CommandContext): Promise<CommandResult> {
         const provider = context.chatViewProvider;
         if (provider && provider.refreshSystemPrompt) {
-            await provider.refreshSystemPrompt();
-            return { status: 'success' };
+            try {
+                await provider.refreshSystemPrompt();
+                await context.webview.postMessage({
+                    type: 'aiResponse',
+                    value: '✅ **热重载成功**：系统提示词已根据 `.opengravity/SYSTEM.md` 完成刷新。'
+                });
+                return { status: 'success' };
+            } catch (e: any) {
+                return { status: 'error', message: `刷新失败: ${e.message}` };
+            }
         }
         return { status: 'error', message: '❌ 内部错误：无法获取刷新接口。' };
     }
 
-    private getGeminiPath(): string | undefined {
+    private getSystemMdPath(): string | undefined {
         const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-        return root ? path.join(root, '.opengravity', 'GEMINI.md') : undefined;
+        return root ? path.join(root, '.opengravity', 'SYSTEM.md') : undefined;
     }
 }

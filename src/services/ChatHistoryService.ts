@@ -7,7 +7,7 @@ import { Logger } from '../utils/logger';
 /**
  * ChatHistoryService: 负责会话历史在硬盘上的存储、加载、列表和删除。
  * 与内存中的 HistoryManager 完全解耦，只处理文件 I/O。
- * 借鉴 gemini-cli 的 chatCommand.ts 中关于 checkpoint 文件操作的逻辑。
+ * 借鉴 opengravity-logic 的 chatCommand.ts 中关于 checkpoint 文件操作的逻辑。
  */
 export class ChatHistoryService {
     private readonly SESSIONS_DIR_NAME = '.opengravity/sessions';

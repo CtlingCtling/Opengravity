@@ -6,7 +6,7 @@ import { Logger } from '../../utils/logger';
 
 /**
  * AtHandler: 处理以 '@' 开头的上下文注入指令
- * 逻辑参考自 gemini-cli 的 atCommandProcessor.ts
+ * 逻辑参考自 opengravity-logic 的 atCommandProcessor.ts
  */
 export class AtHandler {
     // 忽略的目录和文件黑名单 (Smart Filtering)
@@ -61,7 +61,7 @@ export class AtHandler {
     private static async handleFile(absPath: string, relPath: string, context: CommandContext): Promise<CommandResult> {
         const content = await fs.promises.readFile(absPath, 'utf-8');
         
-        // 使用结构化界定符 (参考 gemini-cli)
+        // 使用结构化界定符 (参考 opengravity-logic)
         const injectionMessage = [
             `REFERENCE_CONTENT_START: ${relPath}`,
             "```",

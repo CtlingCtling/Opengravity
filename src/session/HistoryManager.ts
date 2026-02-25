@@ -3,7 +3,7 @@ import { ApiMessage } from '../provider';
 /**
  * HistoryManager: 管理内存中的当前对话历史，作为 UI 的单一事实来源。
  * 与文件存储逻辑完全解耦。
- * 借鉴 gemini-cli 的 useHistoryManager.ts 思想。
+ * 借鉴 opengravity-logic 的 useHistoryManager.ts 思想。
  */
 export class HistoryManager {
     private _history: ApiMessage[] = [];
@@ -46,7 +46,7 @@ export class HistoryManager {
 
     /**
      * 更新历史记录中的一条消息 (可选功能, 暂不实现)
-     * gemini-cli 中有 updateItem, 但其评论提到已废弃，且目前我们用不到。
+     * opengravity-logic 中有 updateItem, 但其评论提到已废弃，且目前我们用不到。
      * 如果未来需要编辑历史消息，可在此处实现。
      */
     /**
