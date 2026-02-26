@@ -100,8 +100,37 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
                     const t = vscode.window.activeTerminal || vscode.window.createTerminal("OPGV");
                     t.show(); t.sendText(data.value);
                     break;
+                case 'abortTask':
+                    await this.handleAbortTask();
+                    break;
             }
         });
+    }
+
+    /**
+     * 紧急阻断：停止所有正在进行的工作
+     */
+    private async handleAbortTask() {
+        Logger.warn("[OPGV] EMERGENCY STOP triggered by user (Esc key).");
+        
+        // 1. 重置所有锁和状态
+        this._isProcessing = false;
+        this._recursionDepth = 0;
+        
+        // 2. 如果有挂起的审批，强制清理
+        if (this._isWaitingForApproval) {
+            if (this._pendingDiff) {
+                DiffContentProvider.clear(this._pendingDiff.diffUri);
+                this._pendingDiff = undefined;
+            }
+            this._pendingToolCallId = undefined;
+            this._isWaitingForApproval = false;
+            vscode.commands.executeCommand('setContext', 'opengravity.diffVisible', false);
+        }
+
+        // 3. UI 反馈
+        this._postWebviewMessage('error', '🚨 **STOPPED**: All active tasks have been terminated by user command.');
+        vscode.window.showWarningMessage('🚨 Opengravity: 任务已强制停止。');
     }
 
     public async handleApplyDiff() {

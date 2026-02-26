@@ -237,3 +237,11 @@ window.addEventListener('message', event => {
 
 // Signal ready
 vscode.postMessage({ type: 'webviewLoaded' });
+
+// --- Global Key Listeners ---
+window.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+        // [紧急阻断] 通知后台停止一切工作
+        vscode.postMessage({ type: 'abortTask' });
+    }
+});
