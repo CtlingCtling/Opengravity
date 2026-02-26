@@ -71,11 +71,13 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
                 case 'webviewLoaded':
                     const currentHistory = this._historyManager.getHistory();
                     if (currentHistory.length > 0) {
-                        this._postWebviewMessage('restoreHistory', currentHistory.filter(m => (m.role === 'user' || m.role === 'assistant') && m.content).map(m => ({ role: m.role === 'assistant' ? 'ai' : 'user', content: m.content || "" })));
+                        this._postWebviewMessage(
+                            'restoreHistory', 
+                            currentHistory.filter(m => (m.role === 'user' || m.role === 'assistant') && m.content).map(m => ({ role: m.role === 'assistant' ? 'ai' : 'user', content: m.content || "" })));
                     }
                     break;
                 case 'userInput':
-                    if (this._isProcessing) return;
+                    if (this._isProcessing) { return; }
                     await this.handleUserMessage(data.value);
                     break;
                 case 'saveAndClear':
@@ -169,7 +171,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     }
 
     private async handleUserMessage(content: string, isToolResponse: boolean = false, isSilent: boolean = false) {
-        if (!this._view) return;
+        if (!this._view) { return; }
         const provider = await this._getAIProvider();
         if (!provider) {
             this._postWebviewMessage('error', 'API key missing');
@@ -186,7 +188,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
                 this._historyManager, this._chatHistoryService, this._stateManager, this
             );
             if (dispatchResult) {
-                if (dispatchResult.status === 'error') this._postWebviewMessage('error', dispatchResult.message);
+                if (dispatchResult.status === 'error') { this._postWebviewMessage('error', dispatchResult.message); }
                 return;
             }
         }
@@ -202,7 +204,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 
         if (this._recursionDepth > maxDepth) {
             Logger.warn(`[OPGV] Max recursion reached: ${this._recursionDepth}`);
-            if (!isSilent) this._postWebviewMessage('error', `Maximum recursion depth (${maxDepth}) reached.`);
+            if (!isSilent) { this._postWebviewMessage('error', `Maximum recursion depth (${maxDepth}) reached.`); }
             return;
         }
 
@@ -214,13 +216,13 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         this._isProcessing = true; 
         try {
             const canSpeak = this._stateManager.canSpeak() && !isSilent;
-            if (canSpeak) this._postWebviewMessage('streamStart', undefined);
+            if (canSpeak){ this._postWebviewMessage('streamStart', undefined); }
 
             const allTools = await this._getAvailableTools();
             const sanitizedHistory = this._historyManager.getSanitizedHistory();
             
             const onUpdate = (update: any) => {
-                if (canSpeak) this._postWebviewMessage('streamUpdate', update.delta, update.type);
+                if (canSpeak) { this._postWebviewMessage('streamUpdate', update.delta, update.type); }
             };
 
             const aiResponse = await provider.generateContentStream(sanitizedHistory, onUpdate, allTools);
@@ -231,7 +233,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
             }
 
             this._historyManager.addItem(aiResponse);
-            if (canSpeak) this._postWebviewMessage('streamEnd', undefined);
+            if (canSpeak) { this._postWebviewMessage('streamEnd', undefined); }
             
             await this._chatHistoryService.saveCheckpoint('session_history', this._historyManager.getHistory());
 
@@ -251,7 +253,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     }
 
     private _postWebviewMessage(type: string, value: any, dataType?: string) {
-        if (this._view) this._view.webview.postMessage({ type, value, dataType });
+        if (this._view) { this._view.webview.postMessage({ type, value, dataType }); }
     }
 
     private _handleProcessingError(err: any) {
@@ -270,14 +272,14 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 
     private async handleLinkActiveFile() {
         const editor = vscode.window.activeTextEditor;
-        if (!editor) return;
+        if (!editor) { return; }
         const prompt = `[CONTEXT: \`${path.basename(editor.document.fileName)}\`]\n\`\`\`\n${editor.document.getText()}\n\`\`\`\n\n`;
         this._postWebviewMessage('fillInput', prompt);
     }
 
     private async handleSaveAndClear() {
         const currentHistory = this._historyManager.getHistory();
-        if (currentHistory.length <= 1) return;
+        if (currentHistory.length <= 1) { return; }
         const saveTag = `archive_${Date.now()}`;
         await this._chatHistoryService.saveCheckpoint(saveTag, currentHistory);
         await this._chatHistoryService.deleteCheckpoint('session_history');

@@ -42,7 +42,7 @@ export class ToolExecutor {
      */
     static async run_command(args: { command: string }, onOutput?: (chunk: string) => void): Promise<string> {
         const rootPath = this.getRootPath();
-        if (!rootPath) return "[❌] Error: No workspace folder opened.";
+        if (!rootPath) { return "[❌] Error: No workspace folder opened."; }
 
         // [安全加固] 扩展危险指令黑名单
         const dangerousPatterns = [
@@ -87,13 +87,13 @@ export class ToolExecutor {
             child.stdout.on('data', (data) => {
                 const chunk = data.toString();
                 stdoutBuf += chunk;
-                if (onOutput) onOutput(chunk);
+                if (onOutput) { onOutput(chunk); }
             });
 
             child.stderr.on('data', (data) => {
                 const chunk = data.toString();
                 stderrBuf += chunk;
-                if (onOutput) onOutput(chunk);
+                if (onOutput) { onOutput(chunk); }
             });
 
             // 监听 close 而非 exit，确保 stdio 流已关闭
@@ -114,7 +114,7 @@ export class ToolExecutor {
 
     static async read_file(args: { path: string }): Promise<string> {
         const fullPath = this.getSafePath(args.path);
-        if (!fullPath) return `[❌] 错误: 无效或越界的路径。`;
+        if (!fullPath) { return `[❌] 错误: 无效或越界的路径。`; }
 
         try {
             return await fs.readFile(fullPath, 'utf-8');
@@ -126,7 +126,7 @@ export class ToolExecutor {
 
     static async write_file(args: { path: string, content: string }): Promise<string> {
         const fullPath = this.getSafePath(args.path);
-        if (!fullPath) return `[❌] 错误: 无效或越界的路径。`;
+        if (!fullPath) { return `[❌] 错误: 无效或越界的路径。`; }
 
         try {
             const dir = path.dirname(fullPath);
@@ -141,13 +141,13 @@ export class ToolExecutor {
 
     static async replace(args: { path: string, old_string: string, new_string: string, instruction: string }): Promise<string> {
         const fullPath = this.getSafePath(args.path);
-        if (!fullPath) return `[❌] 错误: 无效或越界的路径。`;
+        if (!fullPath) { return `[❌] 错误: 无效或越界的路径。`; }
 
         try {
             const content = await fs.readFile(fullPath, 'utf-8');
             const firstIndex = content.indexOf(args.old_string);
-            if (firstIndex === -1) return `[❌] 错误：在文件中未找到指定的旧代码片段。`;
-            if (content.lastIndexOf(args.old_string) !== firstIndex) return `[❌] 错误：找到了多个相同的代码片段。`;
+            if (firstIndex === -1) { return `[❌] 错误：在文件中未找到指定的旧代码片段。`; }
+            if (content.lastIndexOf(args.old_string) !== firstIndex) { return `[❌] 错误：找到了多个相同的代码片段。`; }
 
             const newContent = content.slice(0, firstIndex) + args.new_string + content.slice(firstIndex + args.old_string.length);
             await vscode.commands.executeCommand('opengravity.showDiff', { originalUri: vscode.Uri.file(fullPath), newContent });

@@ -58,11 +58,11 @@ export class ProjectAnalyzer {
         const edges: string[] = [];
 
         const scan = async (uri: vscode.Uri, parentNode: string, currentDepth: number) => {
-            if (currentDepth > 2) return;
+            if (currentDepth > 2) { return; }
             const entries = await vscode.workspace.fs.readDirectory(uri);
             for (const [name, type] of entries) {
                 if (type === vscode.FileType.Directory) {
-                    if (this.IGNORE_DIRS.has(name) || name.startsWith('.')) continue;
+                    if (this.IGNORE_DIRS.has(name) || name.startsWith('.')) { continue; }
                     const nodeId = name.replace(/[^a-zA-Z0-9]/g, '_');
                     const isKeyDir = ['src', 'lib', 'app', 'packages', 'crates'].includes(name);
                     if (!nodes.includes(nodeId)) {
@@ -91,7 +91,7 @@ export class ProjectAnalyzer {
 
         try {
             const symbols = await this.extractSymbols(srcUri);
-            if (symbols.length === 0) return `${mindmap}\n        No symbols found in src/`;
+            if (symbols.length === 0) { return `${mindmap}\n        No symbols found in src/`; }
 
             // 构造 Mermaid Mindmap
             let content = mindmap;
@@ -114,19 +114,19 @@ export class ProjectAnalyzer {
         const skipFiles = ['.d.ts', '.test.ts', '.spec.ts'];
 
         const scan = async (uri: vscode.Uri, depth: number) => {
-            if (depth > 2) return;
+            if (depth > 2) { return; }
             const entries = await vscode.workspace.fs.readDirectory(uri);
             for (const [name, type] of entries) {
                 const itemUri = vscode.Uri.joinPath(uri, name);
                 if (type === vscode.FileType.Directory) {
-                    if (!this.IGNORE_DIRS.has(name)) await scan(itemUri, depth + 1);
+                    if (!this.IGNORE_DIRS.has(name)) { await scan(itemUri, depth + 1); }
                 } else if (type === vscode.FileType.File) {
                     if (['.ts', '.js', '.rs', '.py', '.c', '.h'].some(ext => name.endsWith(ext)) && !skipFiles.some(skip => name.endsWith(skip))) {
                         const content = await vscode.workspace.fs.readFile(itemUri);
                         const text = new TextDecoder().decode(content);
                         // 简单的正则匹配：类、接口、重要函数
                         const matches = text.match(/(?:class|interface|fn|function|export const)\s+([a-zA-Z0-9_]+)/g);
-                        if (matches) symbols.push(...matches.map(m => `${name}: ${m.split(/\s+/).pop()}`));
+                        if (matches) { symbols.push(...matches.map(m => `${name}: ${m.split(/\s+/).pop()}`)); }
                     }
                 }
             }
@@ -142,8 +142,8 @@ export class ProjectAnalyzer {
         const groups: Record<string, string[]> = {};
         symbols.forEach(s => {
             const [file, sym] = s.split(': ');
-            if (!groups[file]) groups[file] = [];
-            if (!groups[file].includes(sym)) groups[file].push(sym);
+            if (!groups[file]) { groups[file] = []; }
+            if (!groups[file].includes(sym)) { groups[file].push(sym); }
         });
         return groups;
     }

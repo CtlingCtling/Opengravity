@@ -86,16 +86,16 @@ export class DeepSeekProvider implements AIProvider {
                 }
             }
 
-                        return { role: 'assistant', content: fullContent || null, reasoning_content: fullReasoning, tool_calls: toolCallsBuffer.length > 0 ? toolCallsBuffer : undefined };
-                    } catch (error: any) {
-                        Logger.error(`API Error: ${error.message}`, error); 
-                        let errorMsg = `[API Error]: ${error.message}`;
-                        if (error.message.includes('context length')) {
-                            errorMsg += "\n\n💡 **Tip:** Context is near its limit. Use `/compress` to prune conversation history.";
-                        }
-                        onUpdate({ type: 'content', delta: errorMsg });
-                        return { role: 'assistant', content: error.message };
-                    }
-                }
+            return { role: 'assistant', content: fullContent || null, reasoning_content: fullReasoning, tool_calls: toolCallsBuffer.length > 0 ? toolCallsBuffer : undefined };
+        } catch (error: any) {
+            Logger.error(`API Error: ${error.message}`, error); 
+            let errorMsg = `[API Error]: ${error.message}`;
+            if (error.message.includes('context length')) {
+                errorMsg += "\n\n💡 **Tip:** Context is near its limit. Use `/compress` to prune conversation history.";
             }
+            onUpdate({ type: 'content', delta: errorMsg });
+            return { role: 'assistant', content: error.message };
+        }
+    }
+}
             

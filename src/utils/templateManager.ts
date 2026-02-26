@@ -66,10 +66,10 @@ export class TemplateManager {
         }
 
         const rootPath = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-        if (!rootPath) return content;
+        if (!rootPath) { return content; }
 
         const matches = [...content.matchAll(this.REF_REGEX)];
-        if (matches.length === 0) return content;
+        if (matches.length === 0) { return content; }
 
         let processed = content;
         for (const match of matches) {
@@ -77,7 +77,7 @@ export class TemplateManager {
             const absPath = path.normalize(path.join(rootPath, relPath));
 
             // 安全检查：防止路径穿越
-            if (!absPath.startsWith(rootPath) || visited.has(absPath)) continue;
+            if (!absPath.startsWith(rootPath) || visited.has(absPath)) { continue; }
 
             try {
                 visited.add(absPath);
@@ -115,7 +115,7 @@ export class TemplateManager {
      */
     static async ensureConfigDir(extensionUri: vscode.Uri) {
         const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
-        if (!workspaceFolder) return;
+        if (!workspaceFolder) { return; }
 
         const rootUri = workspaceFolder.uri;
         const configDirUri = vscode.Uri.joinPath(rootUri, '.opengravity');

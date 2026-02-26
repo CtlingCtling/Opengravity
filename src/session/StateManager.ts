@@ -25,7 +25,7 @@ export class SessionStateManager {
      */
     async initialize(): Promise<void> {
         const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-        if (!root) return;
+        if (!root) { return; }
 
         const statePath = path.join(root, SessionStateManager.STATE_FILE);
         try {
@@ -79,7 +79,7 @@ export class SessionStateManager {
 
     private async save(): Promise<void> {
         const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-        if (!root) return;
+        if (!root) { return; }
 
         const statePath = path.join(root, SessionStateManager.STATE_FILE);
         const data = JSON.stringify({ mode: this._mode, lastUpdate: Date.now() }, null, 2);

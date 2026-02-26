@@ -19,7 +19,7 @@ export class HeartbeatManager {
      * 开启脉搏
      */
     start() {
-        if (this._interval) return;
+        if (this._interval) { return; }
 
         Logger.info("[HEARTBEAT] Engine started.");
         this._interval = setInterval(async () => {

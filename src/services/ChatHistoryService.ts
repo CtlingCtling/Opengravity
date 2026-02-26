@@ -15,7 +15,7 @@ export class ChatHistoryService {
 
     private async getSessionsDirUri(): Promise<vscode.Uri | undefined> {
         const root = vscode.workspace.workspaceFolders?.[0]?.uri;
-        if (!root) return undefined;
+        if (!root) { return undefined; }
         const sessionsDir = vscode.Uri.joinPath(root, this.SESSIONS_DIR_NAME);
         try {
             await vscode.workspace.fs.createDirectory(sessionsDir);
@@ -60,7 +60,7 @@ export class ChatHistoryService {
      */
     async loadCheckpoint(tag: string): Promise<{ history: ApiMessage[], timestamp: number } | undefined> {
         const sessionsDirUri = await this.getSessionsDirUri();
-        if (!sessionsDirUri) return undefined;
+        if (!sessionsDirUri) { return undefined; }
 
         const fileUri = vscode.Uri.joinPath(sessionsDirUri, `${tag}.json`);
         try {
@@ -79,7 +79,7 @@ export class ChatHistoryService {
      */
     async listCheckpoints(): Promise<{ tag: string, timestamp: number }[]> {
         const sessionsDirUri = await this.getSessionsDirUri();
-        if (!sessionsDirUri) return [];
+        if (!sessionsDirUri) { return []; }
 
         try {
             const entries = await vscode.workspace.fs.readDirectory(sessionsDirUri);
@@ -108,7 +108,7 @@ export class ChatHistoryService {
      */
     async deleteCheckpoint(tag: string): Promise<boolean> {
         const sessionsDirUri = await this.getSessionsDirUri();
-        if (!sessionsDirUri) return false;
+        if (!sessionsDirUri) { return false; }
 
         const fileUri = vscode.Uri.joinPath(sessionsDirUri, `${tag}.json`);
         try {
