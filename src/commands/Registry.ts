@@ -10,6 +10,9 @@ import { InitCommand } from './slash/init';
 import { CompressCommand } from './slash/compress';
 import { MemoryCommand } from './slash/memory';
 import { ScanCommand } from './slash/scan';
+import { AutoCommand } from './slash/auto';
+import { ShutUpCommand } from './slash/shutup';
+import { ManualCommand } from './slash/manual';
 import { DynamicTOMLCommand } from './slash/dynamic';
 import { Logger } from '../utils/logger';
 
@@ -35,7 +38,10 @@ export class CommandRegistry {
             new InitCommand(),
             new CompressCommand(),
             new MemoryCommand(),
-            new ScanCommand()
+            new ScanCommand(),
+            new AutoCommand(),
+            new ShutUpCommand(),
+            new ManualCommand()
         ];
 
         kernels.forEach(cmd => {

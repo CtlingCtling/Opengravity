@@ -65,8 +65,8 @@ export class ScanCommand implements ICommand {
     private async updateProjectMap(extensionUri: vscode.Uri, rootUri: vscode.Uri, mode: ProjectMode, markers: string[], blueprint: string, knowledgeGraph: string) {
         const mapUri = vscode.Uri.joinPath(rootUri, '.opengravity', 'PROJECT_MAP.md');
         
-        // 1. 从 assets/templates 加载模板
-        const rawTemplate = await TemplateManager.loadInternalTemplate(extensionUri, 'project_map.md');
+        // 1. 从 assets/templates 加载模板 (已对齐全大写命名)
+        const rawTemplate = await TemplateManager.loadInternalTemplate(extensionUri, 'PROJECT_MAP.md');
         
         // 2. 渲染数据 (修复：增加 await)
         const content = await TemplateManager.render(rawTemplate, {

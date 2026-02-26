@@ -4,6 +4,7 @@ import { McpHost } from '../mcp/mcpHost';
 import { CommandRegistry } from './Registry';
 import { HistoryManager } from '../session/HistoryManager';
 import { ChatHistoryService } from '../services/ChatHistoryService';
+import { SessionStateManager } from '../session/StateManager';
 
 /**
  * 指令执行上下文，为指令提供各种系统能力的引用
@@ -16,6 +17,7 @@ export interface CommandContext {
     registry: CommandRegistry;
     historyManager: HistoryManager;
     chatHistoryService: ChatHistoryService;
+    stateManager: SessionStateManager; // [新增] 状态管理器
     chatViewProvider: any; // 传入 ChatViewProvider 实例以支持高级刷新
     // 用于向对话流注入“虚拟用户消息”的回调
     onInjectMessage: (content: string) => Promise<void>;

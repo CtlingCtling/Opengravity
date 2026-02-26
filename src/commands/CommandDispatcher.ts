@@ -8,6 +8,7 @@ import { AtHandler } from './at/AtHandler';
 import { ShellHandler } from './shell/ShellHandler';
 import { HistoryManager } from '../session/HistoryManager';
 import { ChatHistoryService } from '../services/ChatHistoryService';
+import { SessionStateManager } from '../session/StateManager';
 
 export class CommandDispatcher {
     private registry: CommandRegistry;
@@ -30,6 +31,7 @@ export class CommandDispatcher {
         onInjectMessage: (content: string) => Promise<void>,
         historyManager: HistoryManager,
         chatHistoryService: ChatHistoryService,
+        stateManager: SessionStateManager, // [新增]
         chatViewProvider: any
     ): Promise<CommandResult | null> {
         const trimmed = text.trim();
@@ -41,6 +43,7 @@ export class CommandDispatcher {
             onInjectMessage,
             historyManager,
             chatHistoryService,
+            stateManager, // [新增]
             chatViewProvider
         };
 

@@ -122,7 +122,7 @@ export class TemplateManager {
 
         try {
             // 1. 确保基础子目录存在 (异步)
-            const baseDirs = ['skills', 'agents', 'codingstyle', 'commands', 'sessions', 'commands_prompt'];
+            const baseDirs = ['skills', 'agents', 'codingstyle', 'commands', 'sessions', 'commands_prompt', 'memory'];
             for (const dir of baseDirs) {
                 const dirUri = vscode.Uri.joinPath(configDirUri, dir);
                 try {

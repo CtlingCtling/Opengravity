@@ -55,7 +55,7 @@ describe('指令系统集成测试', () => {
 
     describe('CommandDispatcher 路由分发', () => {
         it('应该识别并分发 Slash 指令 (/)', async () => {
-            const result = await dispatcher.dispatch('/help', {} as any, {} as any, { postMessage: jest.fn() } as any, {} as any, jest.fn(), {} as any, {} as any, {} as any);
+            const result = await dispatcher.dispatch('/help', {} as any, {} as any, { postMessage: jest.fn() } as any, {} as any, jest.fn(), {} as any, {} as any, {} as any, {} as any);
             expect(result).not.toBeNull();
             expect(result?.status).toBeDefined();
         });
@@ -66,7 +66,7 @@ describe('指令系统集成测试', () => {
             (fs.promises.readFile as jest.Mock).mockResolvedValue('content');
 
             const spy = jest.spyOn(AtHandler, 'handle');
-            await dispatcher.dispatch('@file.ts', {} as any, {} as any, {} as any, {} as any, jest.fn(), {} as any, {} as any, {} as any);
+            await dispatcher.dispatch('@file.ts', {} as any, {} as any, {} as any, {} as any, jest.fn(), {} as any, {} as any, {} as any, {} as any);
             expect(spy).toHaveBeenCalled();
         });
 
@@ -74,7 +74,7 @@ describe('指令系统集成测试', () => {
             const spy = jest.spyOn(ShellHandler, 'handle');
             // 模拟用户取消以快速结束
             (vscode.window.showWarningMessage as jest.Mock).mockResolvedValue('取消');
-            await dispatcher.dispatch('!ls', {} as any, {} as any, {} as any, {} as any, jest.fn(), {} as any, {} as any, {} as any);
+            await dispatcher.dispatch('!ls', {} as any, {} as any, {} as any, {} as any, jest.fn(), {} as any, {} as any, {} as any, {} as any);
             expect(spy).toHaveBeenCalled();
         });
     });

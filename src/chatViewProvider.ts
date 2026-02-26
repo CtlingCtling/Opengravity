@@ -7,23 +7,28 @@ import { ToolExecutor } from './tools/executor';
 import { OPGV_TOOLS } from './tools/definitions';
 import { Logger } from './utils/logger';
 import { CommandDispatcher } from './commands/CommandDispatcher';
-import { HistoryManager } from './session/HistoryManager'; // 引入 HistoryManager
-import { ChatHistoryService } from './services/ChatHistoryService'; // 引入 ChatHistoryService
+import { HistoryManager } from './session/HistoryManager'; 
+import { ChatHistoryService } from './services/ChatHistoryService'; 
 import { DiffContentProvider } from './utils/diffProvider';
 import { TemplateManager } from './utils/templateManager';
+import { SessionStateManager, AriaMode } from './session/StateManager';
+import { HeartbeatManager } from './session/HeartbeatManager';
 
 export class ChatViewProvider implements vscode.WebviewViewProvider {
     public static readonly viewType = 'opengravity.chatView';
     private _view?: vscode.WebviewView;
     private _recursionDepth = 0;
-    private static MAX_RECURSION_DEPTH = 5;
+    private static readonly DEFAULT_MAX_DEPTH = 10; 
+    private static readonly AUTO_MAX_DEPTH = 100;   
     private _commandDispatcher: CommandDispatcher;
-    private _historyManager: HistoryManager; // 使用 HistoryManager 管理内存状态
-    private _chatHistoryService: ChatHistoryService; // 使用 ChatHistoryService 管理持久化
-    private _pendingDiff?: { originalUri: vscode.Uri, newContent: string, diffUri: vscode.Uri }; // 挂起的 Diff
-    private _pendingToolCallId?: string; // [新增] 记录挂起的 ToolCall ID，用于精准回填
-    private _isWaitingForApproval = false; // 审批锁
-    private _isProcessing = false; // [新增] 全局处理锁：防止协议冲突
+    private _historyManager: HistoryManager; 
+    private _chatHistoryService: ChatHistoryService; 
+    private _stateManager: SessionStateManager; 
+    private _heartbeatManager?: HeartbeatManager; 
+    private _pendingDiff?: { originalUri: vscode.Uri, newContent: string, diffUri: vscode.Uri }; 
+    private _pendingToolCallId?: string; 
+    private _isWaitingForApproval = false; 
+    private _isProcessing = false; 
     private _systemPrompt: string;
 
     constructor(
@@ -34,14 +39,25 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     ) {
         this._systemPrompt = systemPrompt;
         this._commandDispatcher = new CommandDispatcher(this._extensionUri);
-        this._historyManager = new HistoryManager(); // 初始化内存状态
-        this._chatHistoryService = new ChatHistoryService(); // 初始化持久化服务
+        this._historyManager = new HistoryManager(); 
+        this._chatHistoryService = new ChatHistoryService(); 
+        this._stateManager = new SessionStateManager(); 
     }
 
     public async resolveWebviewView(webviewView: vscode.WebviewView) {
         this._view = webviewView;
-        
-        // 加载最后会话历史
+        await this._stateManager.initialize();
+
+        if (!this._heartbeatManager) {
+            this._heartbeatManager = new HeartbeatManager(
+                this._stateManager,
+                async (prompt) => {
+                    await this.handleUserMessage(prompt, false, true);
+                }
+            );
+            this._heartbeatManager.start();
+        }
+
         const lastSession = await this._chatHistoryService.loadCheckpoint('session_history');
         if (lastSession && lastSession.history) {
             this._historyManager.loadHistory(lastSession.history);
@@ -88,32 +104,20 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         });
     }
 
-    /**
-     * 处理“采纳修改” (对外公开接口)
-     */
     public async handleApplyDiff() {
         if (this._pendingDiff && this._pendingToolCallId) {
             try {
-                // 1. 执行写文件
                 const encoder = new TextEncoder();
                 await vscode.workspace.fs.writeFile(this._pendingDiff.originalUri, encoder.encode(this._pendingDiff.newContent));
-                
-                // 2. 清理状态
                 DiffContentProvider.clear(this._pendingDiff.diffUri);
                 await vscode.commands.executeCommand('workbench.action.closeActiveEditor');
-                
-                // 3. [协议修复] 精准更新对应的 Tool 消息
                 const successMsg = `[SUCCESS] User APPROVED and applied the changes to \`${path.basename(this._pendingDiff.originalUri.fsPath)}\`.`;
                 this._historyManager.updateToolResult(this._pendingToolCallId, successMsg);
-                
                 this._isWaitingForApproval = false;
                 this._pendingToolCallId = undefined;
                 vscode.commands.executeCommand('setContext', 'opengravity.diffVisible', false);
                 this._pendingDiff = undefined;
-
                 vscode.window.showInformationMessage('✅ 修改已应用。');
-
-                // 4. 触发 AI 自动执行下一步 (此时 AI 会看到 SUCCESS 状态)
                 await this.handleUserMessage("", true);
             } catch (err: any) {
                 vscode.window.showErrorMessage(`应用修改失败: ${err.message}`);
@@ -121,77 +125,55 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         }
     }
 
-    /**
-     * 处理“拒绝修改” (对外公开接口)
-     */
     public async handleCancelDiff() {
         if (this._pendingDiff && this._pendingToolCallId) {
             DiffContentProvider.clear(this._pendingDiff.diffUri);
             await vscode.commands.executeCommand('workbench.action.closeActiveEditor');
-            
-            // [协议修复] 精准更新对应的 Tool 消息为 REJECTED
             const rejectMsg = `[REJECTED] User declined the changes to \`${path.basename(this._pendingDiff.originalUri.fsPath)}\`.`;
             this._historyManager.updateToolResult(this._pendingToolCallId, rejectMsg);
-
             this._isWaitingForApproval = false;
             this._pendingToolCallId = undefined;
             vscode.commands.executeCommand('setContext', 'opengravity.diffVisible', false);
             this._pendingDiff = undefined;
-
-            // 触发 AI 重新思考 (此时 AI 会看到 REJECTED 状态)
             await this.handleUserMessage("", true);
         }
     }
 
-    private async handleUserMessage(content: string, isToolResponse: boolean = false) {
-        if (!this._view) {
-            return;
-        }
+    private async handleUserMessage(content: string, isToolResponse: boolean = false, isSilent: boolean = false) {
+        if (!this._view) return;
         const provider = await this._getAIProvider();
         if (!provider) {
             this._postWebviewMessage('error', 'API key missing');
             return;
         }
 
-        // --- 指令拦截钩子 ---
-        if (!isToolResponse && content) {
+        if (!isToolResponse && content && !isSilent) {
             const dispatchResult = await this._commandDispatcher.dispatch(
-                content,
-                provider,
-                this._mcpHost,
-                this._view.webview,
-                this._extensionUri,
+                content, provider, this._mcpHost, this._view.webview, this._extensionUri,
                 async (fakeMsg) => {
-                    // 用于注入合成消息的回调逻辑（TOML用）
                     this._historyManager.addItem({ role: 'user', content: fakeMsg });
                     await this.handleUserMessage("", true);
                 },
-                this._historyManager,
-                this._chatHistoryService,
-                this // 传入 ChatViewProvider 实例
+                this._historyManager, this._chatHistoryService, this._stateManager, this
             );
-
-            // 如果指令已执行并被消费，则停止后续 AI 流
             if (dispatchResult) {
-                if (dispatchResult.status === 'error') {
-                    this._postWebviewMessage('error', dispatchResult.message);
-                }
+                if (dispatchResult.status === 'error') this._postWebviewMessage('error', dispatchResult.message);
                 return;
             }
         }
-        // ------------------
 
         if (isToolResponse) {
             this._recursionDepth++;
-        } else {
+        } else if (content.trim() !== "" && !isSilent) {
             this._recursionDepth = 0;
         }
 
-        if (this._recursionDepth > ChatViewProvider.MAX_RECURSION_DEPTH) {
-            const errMessage = `[OPGV] Recursion depth exceeded (${ChatViewProvider.MAX_RECURSION_DEPTH}). Stopping tool auto-resuming to prevent infinite loops.`;
-            Logger.error(errMessage);
-            this._postWebviewMessage('error', 'Maximum recursion depth reached. Possible infinite tool execution loop.');
-            this._recursionDepth = 0;
+        const isAuto = this._stateManager.isAutonomous();
+        const maxDepth = isAuto ? ChatViewProvider.AUTO_MAX_DEPTH : ChatViewProvider.DEFAULT_MAX_DEPTH;
+
+        if (this._recursionDepth > maxDepth) {
+            Logger.warn(`[OPGV] Max recursion reached: ${this._recursionDepth}`);
+            if (!isSilent) this._postWebviewMessage('error', `Maximum recursion depth (${maxDepth}) reached.`);
             return;
         }
 
@@ -200,47 +182,47 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
             this._historyManager.addItem({ role: 'user', content });
         }
 
-        this._isProcessing = true; // 锁定输入
-
+        this._isProcessing = true; 
         try {
-            this._postWebviewMessage('streamStart', undefined);
+            const canSpeak = this._stateManager.canSpeak() && !isSilent;
+            if (canSpeak) this._postWebviewMessage('streamStart', undefined);
+
             const allTools = await this._getAvailableTools();
-            
-            // [关键修复] 获取经过协议自愈的历史记录，防止 400 错误
             const sanitizedHistory = this._historyManager.getSanitizedHistory();
             
-            const aiResponse = await this._getAIResponse(provider, sanitizedHistory, allTools);
+            const onUpdate = (update: any) => {
+                if (canSpeak) this._postWebviewMessage('streamUpdate', update.delta, update.type);
+            };
+
+            const aiResponse = await provider.generateContentStream(sanitizedHistory, onUpdate, allTools);
+
+            if (aiResponse.content === 'HEARTBEAT_OK') {
+                Logger.info("[HEARTBEAT] Aria said OK.");
+                return; 
+            }
 
             this._historyManager.addItem(aiResponse);
-            this._postWebviewMessage('streamEnd', undefined);
+            if (canSpeak) this._postWebviewMessage('streamEnd', undefined);
             
-            // 自动保存当前进度
             await this._chatHistoryService.saveCheckpoint('session_history', this._historyManager.getHistory());
 
             if (aiResponse.tool_calls && aiResponse.tool_calls.length > 0) {
                 await this._executeToolCalls(aiResponse.tool_calls);
-                
-                // 检查是否正在等待用户审批。如果是，则中断递归。
                 if (this._isWaitingForApproval) {
-                    Logger.info("[OPGV] Truncating auto-resume loop: Waiting for user approval on code changes.");
                     vscode.commands.executeCommand('setContext', 'opengravity.diffVisible', true);
                     return; 
                 }
-
-                Logger.info("[OPGV] All tools done. Auto-resuming...");
-                await this.handleUserMessage("", true);
+                await this.handleUserMessage("", true, isSilent);
             }
         } catch (err: any) { 
             this._handleProcessingError(err);
         } finally {
-            this._isProcessing = false; // [关键修复] 无论成功失败，必须释放锁
+            this._isProcessing = false; 
         }
     }
 
     private _postWebviewMessage(type: string, value: any, dataType?: string) {
-        if (this._view) {
-            this._view.webview.postMessage({ type, value, dataType });
-        }
+        if (this._view) this._view.webview.postMessage({ type, value, dataType });
     }
 
     private _handleProcessingError(err: any) {
@@ -248,20 +230,10 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         this._postWebviewMessage('error', err.message || 'An unknown error occurred.');
     }
 
-    /**
-     * 外部接口：强制刷新系统提示词（用于 /memory refresh）
-     */
     public async refreshSystemPrompt() {
-        // 1. 彻底清空内存历史
         this._historyManager.clearHistory();
-        
-        // 2. 重新从磁盘读取最新的系统提示词模板
         this._systemPrompt = await TemplateManager.getSystemPrompt(this._extensionUri);
-        
-        // 3. 依靠 handleUserMessage 中的逻辑或在此手动触发一次合成
         await this._ensureSystemPrompt(); 
-
-        // 4. 同步持久化与 UI
         await this._chatHistoryService.saveCheckpoint('session_history', this._historyManager.getHistory());
         this._postWebviewMessage('clearView', undefined);
         this._postWebviewMessage('restoreHistory', [{ role: 'ai', content: '✅ **系统记忆已刷新**\n\n已重新加载最新的 SYSTEM.md 和 MCP 协议上下文。' }]);
@@ -269,51 +241,33 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 
     private async handleLinkActiveFile() {
         const editor = vscode.window.activeTextEditor;
-        if (!editor) {
-            return;
-        }
+        if (!editor) return;
         const prompt = `[CONTEXT: \`${path.basename(editor.document.fileName)}\`]\n\`\`\`\n${editor.document.getText()}\n\`\`\`\n\n`;
         this._postWebviewMessage('fillInput', prompt);
     }
 
     private async handleSaveAndClear() {
         const currentHistory = this._historyManager.getHistory();
-        if (currentHistory.length <= 1) {
-            return;
-        }
-        
-        // 使用 ChatHistoryService 保存并清空
+        if (currentHistory.length <= 1) return;
         const saveTag = `archive_${Date.now()}`;
         await this._chatHistoryService.saveCheckpoint(saveTag, currentHistory);
         await this._chatHistoryService.deleteCheckpoint('session_history');
-        
         this._historyManager.clearHistory();
         this._postWebviewMessage('clearView', undefined);
-        
         vscode.window.showInformationMessage(`会话已保存为 ${saveTag} 并清空。`);
     }
 
-    // 辅助方法重构
     private async _ensureSystemPrompt() {
         if (this._historyManager.getHistory().length === 0) {
             let systemContent = this._systemPrompt;
-            
             const mcpPrompts = await this._mcpHost.getPromptsForAI();
             if (mcpPrompts.length > 0) {
-                systemContent += "\n\n## Available MCP Prompts:\n";
-                mcpPrompts.forEach(p => {
-                    systemContent += `- [${p.serverName}] ${p.name}: ${p.description}\n`;
-                });
+                systemContent += "\n\n## Available MCP Prompts:\n" + mcpPrompts.map(p => `- [${p.serverName}] ${p.name}: ${p.description}`).join('\n');
             }
-
             const mcpResources = await this._mcpHost.getResourcesForAI();
             if (mcpResources.length > 0) {
-                systemContent += "\n\n## Available MCP Resources:\n";
-                mcpResources.forEach(r => {
-                    systemContent += `- [${r.serverName}] ${r.name} (URI: ${r.uri}): ${r.description}\n`;
-                });
+                systemContent += "\n\n## Available MCP Resources:\n" + mcpResources.map(r => `- [${r.serverName}] ${r.name} (URI: ${r.uri}): ${r.description}\n`);
             }
-
             this._historyManager.addItem({ role: 'system', content: systemContent });
         }
     }
@@ -324,81 +278,63 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         return [...mcpTools, ...opgvTools];
     }
 
-    private async _getAIResponse(provider: AIProvider, messages: ApiMessage[], allTools: any[]): Promise<ApiMessage> {
-        return await provider.generateContentStream(
-            messages,
-            (update) => {
-                this._postWebviewMessage(
-                    'streamUpdate',
-                    update.delta,
-                    update.type
-                );
-            },
-            allTools
-        );
-    }
-
     private async _executeToolCalls(toolCalls: any[]) {
-        this._postWebviewMessage(
-            'streamUpdate', 
-            `\n\n> 🔧 **OPGV Action:** Executing ${toolCalls.length} tools...\n`, 
-            'content'
-        );
-        for (const toolCall of toolCalls) {
-            let result = "";
+        this._postWebviewMessage('streamUpdate', `\n\n> 🔧 **OPGV Action:** Processing ${toolCalls.length} tools...\n`, 'content');
+        for (const tc of toolCalls) {
+            this._historyManager.addItem({ role: 'tool', tool_call_id: tc.id, content: "[EXECUTING] Initializing tool..." });
+        }
+
+        let isInterrupted = false;
+        for (let i = 0; i < toolCalls.length; i++) {
+            const toolCall = toolCalls[i];
             const funcName = toolCall.function.name;
+            let result = "";
             let args;
+
+            if (isInterrupted) {
+                this._historyManager.updateToolResult(toolCall.id, "[SKIPPED] Action pending approval.");
+                continue;
+            }
+
             try {
                 args = JSON.parse(toolCall.function.arguments);
             } catch (e: any) {
-                Logger.error(`[OPGV] Error parsing tool call arguments for ${funcName}:`, e);
-                result = JSON.stringify({
-                    error: `Failed to parse arguments for tool '${funcName}'. Error: ${e.message}`,
-                    rawArguments: toolCall.function.arguments
-                });
-                this._historyManager.addItem({ role: 'tool', tool_call_id: toolCall.id, content: result });
+                result = `[ERROR] Failed to parse arguments: ${e.message}`;
+                this._historyManager.updateToolResult(toolCall.id, result);
                 continue; 
             }
+
             if (funcName === 'read_file') {
                 result = await ToolExecutor.read_file(args);
             } else if (funcName === 'write_file') {
                 result = await ToolExecutor.write_file(args);
             } else if (funcName === 'replace') {
-                // [逻辑修复] 一旦遇到需要审批的操作，记录 ID 并强制中断流水线
-                this._isWaitingForApproval = true;
-                this._pendingToolCallId = toolCall.id;
-                
-                const fullPath = (ToolExecutor as any).getSafePath(args.path);
-                if (fullPath) {
-                    try {
-                        const content = await fs.promises.readFile(fullPath, 'utf-8');
-                        const firstIndex = content.indexOf(args.old_string);
-                        if (firstIndex !== -1 && content.lastIndexOf(args.old_string) === firstIndex) {
-                            const newContent = content.slice(0, firstIndex) + args.new_string + content.slice(firstIndex + args.old_string.length);
-                            const uri = vscode.Uri.file(fullPath);
-                            
-                            // 使用 DiffContentProvider.register 确保内容被正确缓存
-                            const diffUri = DiffContentProvider.register(uri, newContent);
-                            
-                            this._pendingDiff = {
-                                originalUri: uri,
-                                newContent: newContent,
-                                diffUri: diffUri
-                            };
-                        }
-                    } catch (e) {
-                        Logger.error(`[OPGV] Failed to prepare pending diff: ${e}`);
+                if (this._stateManager.isAutonomous()) {
+                    Logger.info(`[AUTONOMOUS] Applying replace to ${args.path}`);
+                    result = await ToolExecutor.replace(args);
+                } else {
+                    this._isWaitingForApproval = true;
+                    this._pendingToolCallId = toolCall.id;
+                    const fullPath = (ToolExecutor as any).getSafePath(args.path);
+                    if (fullPath) {
+                        try {
+                            const content = await fs.promises.readFile(fullPath, 'utf-8');
+                            const firstIndex = content.indexOf(args.old_string);
+                            if (firstIndex !== -1 && content.lastIndexOf(args.old_string) === firstIndex) {
+                                const newContent = content.slice(0, firstIndex) + args.new_string + content.slice(firstIndex + args.old_string.length);
+                                const uri = vscode.Uri.file(fullPath);
+                                const diffUri = DiffContentProvider.register(uri, newContent);
+                                this._pendingDiff = { originalUri: uri, newContent, diffUri };
+                            }
+                        } catch (e) { Logger.error(`[OPGV] Pre-diff error: ${e}`); }
                     }
+                    result = await ToolExecutor.replace(args);
+                    this._postWebviewMessage('showApprovalPanel', undefined);
+                    this._historyManager.updateToolResult(toolCall.id, result);
+                    isInterrupted = true;
+                    continue; 
                 }
-                result = await ToolExecutor.replace(args);
-                // 显式通知 Webview 渲染侧边栏按钮面板
-                this._postWebviewMessage('showApprovalPanel', undefined);
-                
-                // 重要：将初始结果加入历史，然后 break 循环，等待用户动作
-                this._historyManager.addItem({ role: 'tool', tool_call_id: toolCall.id, content: result });
-                break; 
             } else if (funcName === 'run_command') {
-                // [Phase 7] 启用终端流式反馈，并确保结果回传给 AI
                 result = await ToolExecutor.run_command(args, (chunk) => {
                     this._postWebviewMessage('streamUpdate', chunk, 'terminal');
                 });
@@ -409,7 +345,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
             } else {
                 result = await this._mcpHost.executeTool(funcName, args);
             }
-            this._historyManager.addItem({ role: 'tool', tool_call_id: toolCall.id, content: result });
+            this._historyManager.updateToolResult(toolCall.id, result);
         }
         await this._chatHistoryService.saveCheckpoint('session_history', this._historyManager.getHistory());
     }
@@ -420,13 +356,8 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         const ansiUpUri = webview.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'src', 'webview', 'libs', 'ansi_up.js'));
         const purifyUri = webview.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'src', 'webview', 'libs', 'purify.min.js'));
         const htmlPath = vscode.Uri.joinPath(this._extensionUri, 'src', 'webview', 'chat.html');
-        
         let html = await fs.promises.readFile(htmlPath.fsPath, 'utf8');
-        html = html.replace('{{styleUri}}', styleUri.toString());
-        html = html.replace('{{scriptUri}}', scriptUri.toString());
-        html = html.replace('{{ansiUpUri}}', ansiUpUri.toString());
-        html = html.replace('{{purifyUri}}', purifyUri.toString());
-        
+        html = html.replace('{{styleUri}}', styleUri.toString()).replace('{{scriptUri}}', scriptUri.toString()).replace('{{ansiUpUri}}', ansiUpUri.toString()).replace('{{purifyUri}}', purifyUri.toString());
         return html;
     }
 }
