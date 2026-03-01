@@ -160,7 +160,7 @@ export class TemplateManager {
             }
 
             // 3. 注入人格与规范 (Personas & Styles)
-            // 这些是 Aria 灵魂的一部分，不属于业务资产
+            // 这些是 Opengravity 灵魂的一部分，不属于业务资产
             await this.syncDir(vscode.Uri.joinPath(srcRoot, 'agents'), vscode.Uri.joinPath(configDirUri, 'agents'), "Personas");
             await this.syncDir(vscode.Uri.joinPath(srcRoot, 'codingstyle'), vscode.Uri.joinPath(configDirUri, 'codingstyle'), "Coding Styles");
             await this.syncDir(vscode.Uri.joinPath(srcRoot, 'commands_prompt'), vscode.Uri.joinPath(configDirUri, 'commands_prompt'), "System Prompts");

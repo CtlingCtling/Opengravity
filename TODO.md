@@ -1,18 +1,20 @@
 ## 🚀 Next Up: 阶段性目标 (核心能力演进)
 
-### 🏁 Phase: Version Zero (MVP Polish) @priority:critical
+### 🏁 Phase: Version Zero (MVP Polish) @priority:critical [COMPLETED]
 - [x] **初始化逻辑重构 (Init 2.0)**:
-  *   **工作区预检**: 若无 `.opengravity` 文件夹，Webview 显示“未选定 Opengravity 工作区”。
+  *   **工作区预检**: 若无 `.opengravity` 文件夹，Webview 显示“未 选定 Opengravity 工作区”。
   *   **延迟同步**: 在运行 `/init` 之前，不自动粘贴 skill 和 toml 文件。
-- [ ] **内存压缩系统 (Advanced Compression)**:
+- [x] **内存压缩系统 (Advanced Compression)**:
   *   **State Snapshot**: 借鉴 Gemini CLI，将 `/compress` 升级为结构化 XML 快照。
 - [x] **时间感知增强**:
-  *   **主动查询**: 实现 `get_time` 机制，让 Aria 随时拥有时间观念（非仅依赖心跳注入）。
-- [x] **冗余清理**: 找到并彻底移除 `agents/code_reviewer.md` 及其关联逻辑。
-- [x] **交互验证**: 确认 `read_file` 免审批逻辑已实现且具有视觉反馈。
-- [ ] **品牌与文档**: 
-  *   **Icon**: 为 Opengravity 寻找/设计一个精致的图标。
-  *   **README**: 撰写详细的技术架构说明与操作指南。
+  *   **主动查询**: 实现 `get_time` 机制，让 Opengravity 随时拥有 时间观念（非仅依赖心跳注入）。
+- [x] **冗余清理**: 找到并彻底移除 `agents/code_reviewer.md` 及其 关联逻辑。
+- [x] **交互验证**: 确认 `read_file` 免审批逻辑已实现且具有视觉反 馈。
+- [x] **IntelliSense**: 
+- [x] **品牌与文档**: 
+  *   [ ] **Icon**: 为 Opengravity 寻找/设计一个精致的图标。
+  *   [x] **README**: 撰写详细的技术架构说明与操作指南。
+  *   [x] **License**: 添加 MIT 授权协议。
 
 ---
 
@@ -23,25 +25,27 @@
 - [x] **Phase 6: 代码修改系统** @priority:high
   - [x] **增量代码修改 (Surgical Edits)**: 实现基于 `old_string/new_string` 的精准局部修改。
   - [x] **Inline Diff 深度集成**: 编辑器标题栏“勾/叉”审批按钮与 VSCode Context 联动。
-  - [x] **Recursion Defense**: 基于协议自愈的历史记录扫描，彻底拦截循环调用。
+  - [x] **Recursion Defense**: 基于协议自愈的历史记录扫描，彻底拦 截循环调用。
 
 - [x] **Phase 7: 命令行执行系统 (Streaming Shell)** @priority:critical
-  - [x] **实现流式执行**: 基于 `spawn` 的实时终端反馈，支持 ANSI 彩色渲染。
+  - [x] **实现流式执行**: 基于 `spawn` 的实时终端反馈，支持 ANSI  彩色渲染。
   - [x] **Xcode/TUI 风格 UI**: 深邃背景、等宽字体、视图隔离架构。
   - [x] **安全性加固**: 危险指令拦截与模态确认逻辑。
 
-- [ ] **Phase 8: 项目感知与提示词工程 (The Awareness Leap)** @priority:critical
-  - [ ] **自适应 /scan 逻辑**: 自动判定 SCRIPT/ENGINEERING 模式。
-  - [ ] **动态地图建模**: 生成包含 Blueprint (Mermaid Flow) 和符号图谱的 `PROJECT_MAP.md`。
-  - [ ] **系统提示词动态合成**: 实现 Agent 根据地图内容自动调整其“思考深度”与“专业角色”。
-  - [ ] **提示词解耦优化**: 完善 `assets/templates/` 体系，确保逻辑与数据的极致分离。
+- [x] **Phase 8: 项目感知与提示词工程 (The Awareness Leap)** @priority:critical
+  - [x] **自适应 /scan 逻辑**: 自动判定 SCRIPT/ENGINEERING 模式。
+  - [x] **动态地图建模**: 生成包含 Blueprint (Mermaid Flow) 和符号图谱的 `PROJECT_MAP.md`。
+  - [x] **系统提示词动态合成**: 实现 Agent 根据地图内容自动调整其“思考深度”与“专业角色”。
+  - [x] **提示词解耦优化**: 完善 `assets/templates/` 体系，确保逻 辑与数据的极致分离。
 
-- [ ] **Phase 9: 发布冲刺 (Release v0.1.0 Polish)** @priority:high
-  - [ ] **交互细节打磨**: 实现指令 IntelliSense 提示与语法高亮。
+- [x] **Phase 9: 发布冲刺 (Release v0.1.0 Polish)** @priority:high [RELEASED]
+  - [x] **交互细节打磨**: 实现指令 IntelliSense 提示与语法高亮。
   - [ ] **DeepSeek v4 适配**: 针对新模型特性优化推理引导提示词。
   - [ ] **演示案例准备**: 准备一套针对复杂项目的“架构感知”技术演示流程。
+  - [x] **版本管理**: 升级至 v0.1.0 并完善 License。
 
 - [ ] **Phase 10: 意图哨兵 (Architectural Sentry)** @priority:medium
+
   - [ ] **意图预检层**: 在行动前强制 AI 进行架构一致性校验。
 
 - [ ] **Phase 11: 任务自主与生命节律 (Autonomy & Heartbeat)** @priority:medium

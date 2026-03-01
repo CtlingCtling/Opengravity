@@ -18,7 +18,14 @@ const inputHighlighter = document.getElementById('input-highlighter');
 // --- Global State ---
 let currentStreamMsg = null;
 let markdownBuffer = "";
-let hasInitPrompted = false; // [新增] 防止重复提示
+let hasInitPrompted = false;
+let isWaitingForApproval = false; // [新增] 审批状态标志
+
+// --- IntelliSense State ---
+const suggestionsBox = document.getElementById('suggestions-box');
+let currentSuggestions = [];
+let activeSuggestionIndex = -1;
+let suggestionTrigger = null; // '/' or '@'
 
 // --- Status Bar ---
 function updateStatusBar(mode) {
@@ -45,7 +52,7 @@ function updateOverlay(status) {
             overlay.classList.remove('hidden');
             overlay.style.backgroundColor = 'var(--vscode-sideBar-background)';
             icon.textContent = '🛠️';
-            msg.innerHTML = '<strong>Aria is waiting.</strong><br>Type <span style="color:var(--accent-blue)">/init</span> to start your workflow.';
+            msg.innerHTML = '<strong>Opengravity is waiting.</strong><br>Type <span style="color:var(--accent-blue)">/init</span> to start your workflow.';
             break;
         case 'initialized':
         case 'commands-reloaded':
@@ -66,22 +73,124 @@ function setInputEnabled(enabled) {
 
 // --- Input Highlighting Logic ---
 function syncHighlighter() {
-    let text = inputArea.value;
+    const text = inputArea.value;
     
-    // 转义 HTML 字符
-    text = escapeHtml(text);
+    // [借鉴 gemini-cli] 定义核心正则 (支持转义与边界检查)
+    const SLASH_REGEX = /^\/[a-z0-9_-]+/i;
+    const AT_REGEX = /(?<!\\)@[a-z0-9_.\/\-\[\]]+/gi;
+    const SHELL_REGEX = /(?<!\\)![a-z0-9_-]+/gi;
 
-    // 实时染色正则
-    // 1. /slash 指令 (蓝色)
-    text = text.replace(/^(\/\w+)/g, '<span class="hl-slash">$1</span>');
-    // 2. @path 引用 (绿色)
-    text = text.replace(/(@[\w\.\/\-\"]+)/g, '<span class="hl-at">$1</span>');
-    // 3. !shell 指令 (红色)
-    text = text.replace(/^(!\w+)/g, '<span class="hl-shell">$1</span>');
+    let html = '';
+    let lastIndex = 0;
 
-    // 换行处理：为了让 div 和 textarea 的换行完全一致
-    inputHighlighter.innerHTML = text + (text.endsWith('\n') ? ' ' : '');
+    // 1. 处理 Slash 指令 (仅限全局开头)
+    const slashMatch = text.match(SLASH_REGEX);
+    if (slashMatch && slashMatch.index === 0) {
+        html += `<span class="hl-slash">${escapeHtml(slashMatch[0])}</span>`;
+        lastIndex = slashMatch[0].length;
+    }
+
+    // 2. 处理剩余文本的 Tokenization (At 引用与 Shell 指令)
+    const remainingText = text.slice(lastIndex);
+    const tokens = [];
+    
+    // 找出所有匹配项并排序
+    let m;
+    while ((m = AT_REGEX.exec(text)) !== null) {
+        if (m.index < lastIndex) continue;
+        tokens.push({ index: m.index, length: m[0].length, type: 'hl-at', text: m[0] });
+    }
+    AT_REGEX.lastIndex = 0; // 重置正则状态
+
+    while ((m = SHELL_REGEX.exec(text)) !== null) {
+        if (m.index < lastIndex) continue;
+        // 避免与 Slash 或已识别的 Token 重叠
+        if (!tokens.some(t => m.index >= t.index && m.index < t.index + t.length)) {
+            tokens.push({ index: m.index, length: m[0].length, type: 'hl-shell', text: m[0] });
+        }
+    }
+    SHELL_REGEX.lastIndex = 0;
+
+    tokens.sort((a, b) => a.index - b.index);
+
+    // 拼装 HTML
+    tokens.forEach(token => {
+        // 添加 Token 之前的普通文本
+        html += escapeHtml(text.slice(lastIndex, token.index));
+        // 添加高亮 Token
+        html += `<span class="${token.type}">${escapeHtml(token.text)}</span>`;
+        lastIndex = token.index + token.length;
+    });
+
+    // 添加剩余文本
+    html += escapeHtml(text.slice(lastIndex));
+
+    // [核心修正] 换行对齐：如果文本以换行符结尾，必须补一个空格，否则 div 高度不会塌陷
+    inputHighlighter.innerHTML = html + (text.endsWith('\n') ? ' ' : '');
 }
+
+// --- IntelliSense UI ---
+function renderSuggestions() {
+    if (!suggestionsBox) return;
+    if (currentSuggestions.length === 0) {
+        suggestionsBox.classList.add('hidden');
+        return;
+    }
+
+    suggestionsBox.innerHTML = currentSuggestions.map((s, i) => `
+        <div class="suggestion-item ${i === activeSuggestionIndex ? 'active' : ''}" data-index="${i}">
+            <span class="suggestion-label">${escapeHtml(s.label)}</span>
+            <span class="suggestion-desc">${escapeHtml(s.desc)}</span>
+        </div>
+    `).join('');
+    
+    suggestionsBox.classList.remove('hidden');
+
+    // [Auto-Scroll Logic]
+    if (activeSuggestionIndex !== -1 && suggestionsBox.children[activeSuggestionIndex]) {
+        const activeEl = suggestionsBox.children[activeSuggestionIndex];
+        if (activeEl.offsetTop < suggestionsBox.scrollTop) {
+            suggestionsBox.scrollTop = activeEl.offsetTop;
+        } else if (activeEl.offsetTop + activeEl.clientHeight > suggestionsBox.scrollTop + suggestionsBox.clientHeight) {
+            suggestionsBox.scrollTop = activeEl.offsetTop + activeEl.clientHeight - suggestionsBox.clientHeight;
+        }
+    }
+    
+    suggestionsBox.querySelectorAll('.suggestion-item').forEach(el => {
+        el.onclick = () => {
+            activeSuggestionIndex = parseInt(el.dataset.index);
+            applySuggestion();
+        };
+    });
+}
+
+function applySuggestion() {
+    if (activeSuggestionIndex < 0 || activeSuggestionIndex >= currentSuggestions.length) return;
+    
+    const suggestion = currentSuggestions[activeSuggestionIndex];
+    const text = inputArea.value;
+    const cursorPos = inputArea.selectionStart;
+    const textBeforeCursor = text.slice(0, cursorPos);
+    const lastTriggerIndex = textBeforeCursor.lastIndexOf(suggestionTrigger);
+    
+    if (lastTriggerIndex !== -1) {
+        const newText = text.slice(0, lastTriggerIndex) + suggestion.value + ' ' + text.slice(cursorPos);
+        inputArea.value = newText;
+        const newCursorPos = lastTriggerIndex + suggestion.value.length + 1;
+        inputArea.selectionStart = inputArea.selectionEnd = newCursorPos;
+        syncHighlighter();
+    }
+    
+    closeSuggestions();
+}
+
+function closeSuggestions() {
+    currentSuggestions = [];
+    activeSuggestionIndex = -1;
+    suggestionTrigger = null;
+    if (suggestionsBox) suggestionsBox.classList.add('hidden');
+}
+
 
 // --- Input Handling ---
 function performSend() {
@@ -101,6 +210,30 @@ inputArea.addEventListener('input', function() {
     this.style.height = 'auto';
     this.style.height = Math.min(this.scrollHeight, 150) + 'px';
     syncHighlighter(); // 实时同步高亮
+
+    // [IntelliSense 探测]
+    const text = this.value;
+    const cursorPos = this.selectionStart;
+    const textBeforeCursor = text.slice(0, cursorPos);
+    
+    // 探测触发字符
+    const lastAt = textBeforeCursor.lastIndexOf('@');
+    const lastSlash = textBeforeCursor.lastIndexOf('/');
+    
+    // @ 补全：必须是行首或空格后
+    if (lastAt !== -1 && (lastAt === 0 || textBeforeCursor[lastAt-1] === ' ' || textBeforeCursor[lastAt-1] === '\n')) {
+        suggestionTrigger = '@';
+        const query = textBeforeCursor.slice(lastAt + 1);
+        vscode.postMessage({ type: 'getSuggestions', trigger: '@', query });
+    } 
+    // / 补全：仅限最开始
+    else if (lastSlash === 0) {
+        suggestionTrigger = '/';
+        const query = textBeforeCursor.slice(1);
+        vscode.postMessage({ type: 'getSuggestions', trigger: '/', query });
+    } else {
+        closeSuggestions();
+    }
 });
 
 // 处理滚动同步
@@ -238,16 +371,27 @@ function getOrCreateReasoning(msgObj) {
 function showApprovalWidget(msgObj) {
     if (!msgObj.attachments || msgObj.attachments.querySelector('.approval-widget')) return;
 
+    const type = msgObj.element.dataset.approvalType || 'diff';
+    const isCommand = type === 'command';
+
+    const headerText = isCommand ? '🚀 Shell Command Proposal' : '✨ Code Change Proposal';
+    const descText = isCommand 
+        ? 'Opengravity requests to execute a shell command. Please review carefully.' 
+        : 'Opengravity proposes modifications. Review in Diff Editor.';
+    const approveText = isCommand ? 'Run Command' : 'Apply Change';
+    const rejectText = isCommand ? 'Cancel' : 'Decline';
+    const approveBtnClass = isCommand ? 'btn-primary' : 'btn-primary'; // 可以给命令换个颜色，暂且保持一致
+
     const widget = document.createElement('div');
     widget.className = 'approval-widget';
     widget.innerHTML = `
         <div class="widget-block">
-            <div class="widget-header">✨ Code Change Proposal</div>
+            <div class="widget-header">${headerText}</div>
             <div class="widget-body">
-                <p style="margin: 0 0 10px 0; font-size: 11px; opacity: 0.8;">Opengravity proposes modifications. Review in Diff Editor.</p>
+                <p style="margin: 0 0 10px 0; font-size: 11px; opacity: 0.8;">${descText}</p>
                 <div class="approval-buttons">
-                    <button class="btn btn-primary" id="btn-approve">Apply</button>
-                    <button class="btn btn-danger" id="btn-reject">Decline</button>
+                    <button class="btn ${approveBtnClass}" id="btn-approve">${approveText}</button>
+                    <button class="btn btn-danger" id="btn-reject">${rejectText}</button>
                 </div>
             </div>
         </div>
@@ -295,6 +439,7 @@ window.addEventListener('message', event => {
             errorDiv.innerHTML = `<div class="role-label">SYSTEM_ERROR</div><div class="content" style="color: var(--accent-red); font-weight: bold;">${safeParseMarkdown(msg.value)}</div>`;
             chatBox.appendChild(errorDiv);
             setInputEnabled(true); // 发生错误必须解锁
+            isWaitingForApproval = false; // [修复] 重置审批状态
             scrollToBottom();
             break;
 
@@ -302,6 +447,7 @@ window.addEventListener('message', event => {
             currentStreamMsg = appendMessage('ai');
             markdownBuffer = "";
             setInputEnabled(false); // 开始说话，锁定输入
+            isWaitingForApproval = false; // [修复] 重置审批状态
             break;
 
                 case 'streamUpdate':
@@ -350,6 +496,18 @@ window.addEventListener('message', event => {
                             });
                             html += '</div>';
                             diffBody.innerHTML = html;
+                            // 标记当前消息为 diff 类型，供审批 Widget 判断
+                            targetMsg.element.dataset.approvalType = 'diff';
+                        }
+                    } else if (msg.dataType === 'command_preview') {
+                        // [新增] Shell 命令预览
+                        const cmdBody = getOrCreateWidget(targetMsg, 'cmd_preview', 'Command to Execute');
+                        if (cmdBody) {
+                            // 去掉 markdown 代码块标记，只保留命令内容
+                            const cleanCmd = msg.value.replace(/```bash\n|```/g, '').trim();
+                            cmdBody.innerHTML = `<div style="font-family: monospace; color: #30d158; background: #1c1c1e; padding: 10px; border-radius: 6px;">$ ${escapeHtml(cleanCmd)}</div>`;
+                            // 标记当前消息为 command 类型
+                            targetMsg.element.dataset.approvalType = 'command';
                         }
                     } else if (msg.dataType === 'tool_status') {
                         const statusBody = getOrCreateWidget(targetMsg, 'action', 'Tool Action');
@@ -374,6 +532,7 @@ window.addEventListener('message', event => {
             break;
 
         case 'showApprovalPanel':
+            isWaitingForApproval = true;
             const aiMsgs = document.querySelectorAll('.msg.ai');
             if (aiMsgs.length > 0) {
                 const lastAi = aiMsgs[aiMsgs.length - 1];
@@ -383,6 +542,12 @@ window.addEventListener('message', event => {
                     role: 'ai'
                 });
             }
+            break;
+
+        case 'updateSuggestions':
+            currentSuggestions = msg.value;
+            activeSuggestionIndex = currentSuggestions.length > 0 ? 0 : -1;
+            renderSuggestions();
             break;
             
         case 'restoreHistory':
@@ -405,9 +570,95 @@ window.addEventListener('message', event => {
 // Signal ready
 vscode.postMessage({ type: 'webviewLoaded' });
 
-// --- Global Key Listeners ---
+// --- Input Area Listeners (Highlighting & IntelliSense) ---
+inputArea.addEventListener('input', function() {
+    this.style.height = 'auto';
+    this.style.height = Math.min(this.scrollHeight, 150) + 'px';
+    syncHighlighter(); 
+
+    // [IntelliSense 探测]
+    const text = this.value;
+    const cursorPos = this.selectionStart;
+    const textBeforeCursor = text.slice(0, cursorPos);
+    
+    // 探测触发字符
+    const lastAt = textBeforeCursor.lastIndexOf('@');
+    const lastSlash = textBeforeCursor.lastIndexOf('/');
+    
+    // @ 补全：必须是行首或空格后
+    if (lastAt !== -1 && (lastAt === 0 || textBeforeCursor[lastAt-1] === ' ' || textBeforeCursor[lastAt-1] === '\n')) {
+        suggestionTrigger = '@';
+        const query = textBeforeCursor.slice(lastAt + 1);
+        vscode.postMessage({ type: 'getSuggestions', trigger: '@', query });
+    } 
+    // / 补全：仅限最开始
+    else if (lastSlash === 0) {
+        suggestionTrigger = '/';
+        const query = textBeforeCursor.slice(1);
+        vscode.postMessage({ type: 'getSuggestions', trigger: '/', query });
+    } else {
+        closeSuggestions();
+    }
+});
+
+inputArea.addEventListener('scroll', function() {
+    inputHighlighter.scrollTop = this.scrollTop;
+});
+
+inputArea.addEventListener('keydown', function(e) {
+    if (e.key === 'Enter' && e.altKey) {
+        e.preventDefault();
+        performSend();
+    }
+});
+
+// --- Global Key Listeners (Navigation & Approval) ---
 window.addEventListener('keydown', (e) => {
+    // 1. IntelliSense 键盘操控 (优先拦截)
+    if (suggestionsBox && !suggestionsBox.classList.contains('hidden')) {
+        if (e.key === 'ArrowDown') {
+            e.preventDefault();
+            activeSuggestionIndex = (activeSuggestionIndex + 1) % currentSuggestions.length;
+            renderSuggestions();
+            return;
+        }
+        if (e.key === 'ArrowUp') {
+            e.preventDefault();
+            activeSuggestionIndex = (activeSuggestionIndex - 1 + currentSuggestions.length) % currentSuggestions.length;
+            renderSuggestions();
+            return;
+        }
+        if (e.key === 'Tab' || e.key === 'Enter') {
+            e.preventDefault();
+            applySuggestion();
+            return;
+        }
+        if (e.key === 'Escape') {
+            e.preventDefault();
+            closeSuggestions();
+            return;
+        }
+    }
+
+    // 2. 审批键盘操控
+    if (e.key === 'Enter' && isWaitingForApproval && !e.altKey && !e.shiftKey) {
+        e.preventDefault();
+        vscode.postMessage({ type: 'applyLastDiff' });
+        const widget = document.querySelector('.approval-widget');
+        if (widget) widget.remove();
+        isWaitingForApproval = false;
+        return;
+    }
+
+    // 3. 紧急阻断 / 取消审批
     if (e.key === 'Escape') {
-        vscode.postMessage({ type: 'abortTask' });
+        if (isWaitingForApproval) {
+            vscode.postMessage({ type: 'cancelLastDiff' });
+            const widget = document.querySelector('.approval-widget');
+            if (widget) widget.remove();
+            isWaitingForApproval = false;
+        } else {
+            vscode.postMessage({ type: 'abortTask' });
+        }
     }
 });

@@ -27,11 +27,16 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     private _heartbeatManager?: HeartbeatManager; 
     private _pendingDiff?: { originalUri: vscode.Uri, newContent: string, diffUri: vscode.Uri }; 
     private _pendingToolCallId?: string; 
-    private _isWaitingForApproval = false; 
+
+    // [公开状态] 允许外部处理器访问
+    public _isWaitingForApproval = false; 
+    public _pendingCommand?: { command: string };
+
     private _isProcessing = false; 
     private _systemPrompt: string;
 
     constructor(
+
         private readonly _extensionUri: vscode.Uri,
         private readonly _getAIProvider: () => Promise<AIProvider | null>,
         private readonly _mcpHost: McpHost,
@@ -127,6 +132,28 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
                 case 'abortTask':
                     await this.handleAbortTask();
                     break;
+                case 'getSuggestions':
+                    try {
+                        const { trigger, query } = data;
+                        let suggestions: any[] = [];
+                        if (trigger === '/') {
+                            const commands = (this._commandDispatcher as any).registry.getAllCommands();
+                            suggestions = commands
+                                .filter((c: any) => c.name.startsWith(query))
+                                .map((c: any) => ({ label: `/${c.name}`, desc: c.description, value: `/${c.name}` }));
+                        } else if (trigger === '@') {
+                            const files = await vscode.workspace.findFiles(`**/${query}*`, '**/node_modules/**', 10);
+                            suggestions = files.map(f => {
+                                const rel = vscode.workspace.asRelativePath(f);
+                                return { label: `@${path.basename(rel)}`, desc: path.dirname(rel), value: `@${rel}` };
+                            });
+                        }
+                        this._postWebviewMessage('updateSuggestions', suggestions);
+                    } catch (e: any) {
+                        Logger.error(`[OPGV] IntelliSense Error: ${e.message}`);
+                        this._postWebviewMessage('updateSuggestions', []);
+                    }
+                    break;
             }
         });
     }
@@ -174,6 +201,28 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
                 await this.handleUserMessage("", true);
             } catch (err: any) {
                 vscode.window.showErrorMessage(`应用修改失败: ${err.message}`);
+            }
+        } else if (this._pendingCommand) {
+            // [新逻辑] 处理用户手动输入的 '!' Shell 命令
+            const { command } = this._pendingCommand;
+            this._pendingCommand = undefined;
+            this._isWaitingForApproval = false;
+            
+            this._postWebviewMessage('streamUpdate', `🚀 **Executing**: \`${command}\`...\n`, 'terminal');
+            
+            try {
+                const result = await ToolExecutor.run_command({ command }, (chunk) => {
+                    this._postWebviewMessage('streamUpdate', chunk, 'terminal');
+                });
+
+                // 将结果注入历史，让 AI 知晓
+                const resultMsg = `[USER_SHELL_RESULT]\nCommand: \`${command}\`\nOutput:\n${result}`;
+                this._historyManager.addItem({ role: 'user', content: resultMsg });
+                
+                // 触发 AI 的后续反应（可选，让 Opengravity 评价一下执行结果）
+                await this.handleUserMessage("", true);
+            } catch (e: any) {
+                this._postWebviewMessage('streamUpdate', `\n❌ **Error**: ${e.message}`, 'terminal');
             }
         }
     }
@@ -347,6 +396,11 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     }
 
     private async _executeToolCalls(toolCalls: any[]) {
+        // [核心健壮性] 开始新一轮执行前，强行清空挂起状态，防止 UI 死锁
+        this._isWaitingForApproval = false;
+        this._pendingDiff = undefined;
+        this._pendingCommand = undefined;
+
         this._postWebviewMessage('streamUpdate', `Processing ${toolCalls.length} tools...`, 'tool_status');
         for (const tc of toolCalls) {
             this._historyManager.addItem({ role: 'tool', tool_call_id: tc.id, content: "[EXECUTING]" });
@@ -374,80 +428,99 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
             if (funcName === 'read_file') {
                 this._postWebviewMessage('streamUpdate', `🔍 **Reading**: \`${args.path}\`...`, 'tool_status');
                 result = await ToolExecutor.read_file(args);
-                this._postWebviewMessage('streamUpdate', `✅ **Read Complete**: \`${args.path}\` (${result.length} bytes)`, 'tool_status');
-            } else if (funcName === 'write_file') {
-                this._postWebviewMessage('streamUpdate', `Writing to \`${args.path}\`...`, 'tool_status');
-                result = await ToolExecutor.write_file(args);
-                this._postWebviewMessage('streamUpdate', `Success.`, 'tool_status');
-            } else if (funcName === 'replace') {
+                this._postWebviewMessage('streamUpdate', `✅ **Read Complete**`, 'tool_status');
+            } else if (funcName === 'write_file' || funcName === 'replace') {
                 const isAuto = this._stateManager.isAutonomous();
-                const isPersonalityFile = args.path.startsWith('.opengravity/');
+                const isPersonality = path.normalize(args.path).includes('.opengravity/');
+                const fullPath = (ToolExecutor as any).getSafePath(args.path);
+                
+                let diffMd = "";
+                let newContent = "";
 
-                // [高级逻辑] 自进化特权：如果是人格文件或处于自动模式，免审批执行
-                if (isAuto || isPersonalityFile) {
-                    if (isPersonalityFile && !isAuto) {
-                        Logger.info(`[SELF-EVOLUTION] Aria is updating her personality: ${args.path}`);
-                    }
-                    result = await ToolExecutor.replace(args);
-                } else {
-                    // 修改业务代码且处于 Manual 模式：必须审批
-                    this._isWaitingForApproval = true;
-                    this._pendingToolCallId = toolCall.id;
-
-                    // 获取上下文并手动标记染色 (Diff 预览)
-                    const fullPath = (ToolExecutor as any).getSafePath(args.path);
-                    let diffMd = "";
+                // 1. 深度构建预览内容
+                if (funcName === 'write_file') {
+                    newContent = args.content;
+                    diffMd = `Opengravity is **WRITING** to \`${args.path}\`:\n\n\`\`\`\n${args.content.slice(0, 1000)}${args.content.length > 1000 ? '...' : ''}\n\`\`\``;
+                } else if (funcName === 'replace' && fullPath) {
                     try {
-                        const fullContent = await fs.promises.readFile(fullPath, 'utf-8');
-                        const lines = fullContent.split('\n');
-                        const index = fullContent.indexOf(args.old_string);
+                        const currentContent = await fs.promises.readFile(fullPath, 'utf-8');
+                        const index = currentContent.indexOf(args.old_string);
                         if (index !== -1) {
-                            const startLine = fullContent.slice(0, index).split('\n').length;
+                            newContent = currentContent.slice(0, index) + args.new_string + currentContent.slice(index + args.old_string.length);
+                            
+                            const lines = currentContent.split('\n');
+                            const startLine = currentContent.slice(0, index).split('\n').length;
                             const oldLines = args.old_string.split('\n');
                             const newLines = args.new_string.split('\n');
                             const endLine = startLine + oldLines.length - 1;
 
-                            const contextBefore = lines.slice(Math.max(0, startLine - 3), startLine - 1);
-                            const contextAfter = lines.slice(endLine, Math.min(lines.length, endLine + 2));
+                            const contextBefore = lines.slice(Math.max(0, startLine - 4), startLine - 1);
+                            const contextAfter = lines.slice(endLine, Math.min(lines.length, endLine + 3));
 
-                            diffMd = `Proposed changes for \`${args.path}\`:\n\n\`\`\`diff\n`;
-                            contextBefore.forEach((l: string) => diffMd += `  ${l}\n`);
+                            diffMd = `Opengravity is **UPDATING** \`${args.path}\`:\n\n\`\`\`diff\n`;
+                            contextBefore.forEach(l => diffMd += `  ${l}\n`);
                             oldLines.forEach((l: string) => diffMd += `-${l}\n`);
                             newLines.forEach((l: string) => diffMd += `+${l}\n`);
-                            contextAfter.forEach((l: string) => diffMd += `  ${l}\n`);
+                            contextAfter.forEach(l => diffMd += `  ${l}\n`);
                             diffMd += "```";
+                        } else {
+                            diffMd = `⚠️ **Warning**: Could not find exact match in \`${args.path}\` for diff preview.`;
                         }
-                    } catch (e) {
-                        diffMd = `Proposed changes for \`${args.path}\` (context unavailable):\n\n\`\`\`diff\n-${args.old_string}\n+${args.new_string}\n\`\`\``;
+                    } catch (e: any) {
+                        diffMd = `❌ **Error reading file for preview**: ${e.message}`;
                     }
+                }
 
-                    this._postWebviewMessage('streamUpdate', diffMd, 'diff');
+                // 2. 推送预览到 Webview
+                this._postWebviewMessage('streamUpdate', diffMd, 'diff');
 
-                    const fullPathSafe = (ToolExecutor as any).getSafePath(args.path);
-                    if (fullPathSafe) {
-                        try {
-                            const content = await fs.promises.readFile(fullPathSafe, 'utf-8');
-                            const firstIndex = content.indexOf(args.old_string);
-                            if (firstIndex !== -1) {
-                                const newContent = content.slice(0, firstIndex) + args.new_string + content.slice(firstIndex + args.old_string.length);
-                                const uri = vscode.Uri.file(fullPathSafe);
-                                const diffUri = DiffContentProvider.register(uri, newContent);
-                                this._pendingDiff = { originalUri: uri, newContent, diffUri };
-                            }
-                        } catch (e) {}
+                if (isAuto || isPersonality) {
+                    // 3. [自进化/自动路径] 直接执行
+                    if (isPersonality && !isAuto) Logger.info(`[SELF-EVOLUTION] Opengravity action on: ${args.path}`);
+                    result = (funcName === 'write_file') ? await ToolExecutor.write_file(args) : await ToolExecutor.replace(args);
+                    
+                    const icon = result.includes('Success') ? '✅' : '❌';
+                    this._postWebviewMessage('streamUpdate', `${icon} **Auto-Action Result**: ${result}`, 'tool_status');
+                } else {
+                    // 4. [业务路径] 挂起审批并唤起侧边对比
+                    this._isWaitingForApproval = true;
+                    this._pendingToolCallId = toolCall.id;
+                    if (fullPath && newContent) {
+                        const uri = vscode.Uri.file(fullPath);
+                        const diffUri = DiffContentProvider.register(uri, newContent);
+                        this._pendingDiff = { originalUri: uri, newContent, diffUri };
+                        await vscode.commands.executeCommand('vscode.diff', uri, diffUri, `Review: ${path.basename(uri.fsPath)}`);
                     }
-
-                    result = await ToolExecutor.replace(args);
                     this._postWebviewMessage('showApprovalPanel', undefined);
-                    this._historyManager.updateToolResult(toolCall.id, result);
+                    this._historyManager.updateToolResult(toolCall.id, "[PENDING]");
                     isInterrupted = true;
-                    continue; 
+                    continue;
                 }
             }
  else if (funcName === 'run_command') {
-                result = await ToolExecutor.run_command(args, (chunk) => {
-                    this._postWebviewMessage('streamUpdate', chunk, 'terminal');
-                });
+                const isAuto = this._stateManager.isAutonomous();
+                if (isAuto) {
+                    result = await ToolExecutor.run_command(args, (chunk) => {
+                        this._postWebviewMessage('streamUpdate', chunk, 'terminal');
+                    });
+                } else {
+                    this._isWaitingForApproval = true;
+                    this._pendingToolCallId = toolCall.id;
+                    
+                    // [修复] 使用专门的 command_preview 类型，而不是 diff
+                    const cmdMd = `\`\`\`bash\n${args.command}\n\`\`\``;
+                    this._postWebviewMessage('streamUpdate', cmdMd, 'command_preview');
+                    
+                    // 记录挂起的命令参数
+                    this._pendingCommand = args; 
+
+                    this._postWebviewMessage('showApprovalPanel', undefined);
+                    this._historyManager.updateToolResult(toolCall.id, "[WAITING_FOR_EXECUTION]");
+                    isInterrupted = true;
+                    continue;
+                }
+            } else if (funcName === 'get_time') {
+                result = await (ToolExecutor as any).get_time();
             } else {
                 result = await this._mcpHost.executeTool(funcName, args);
             }

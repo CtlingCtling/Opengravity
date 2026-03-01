@@ -4,36 +4,45 @@ import { TemplateManager } from '../../utils/templateManager';
 
 export class CompressCommand implements ICommand {
     name = 'compress';
-    description = '折叠会话摘要 (Kernel)';
+    description = '折叠会话并固化状态快照 (Kernel)';
 
     async execute(args: string[], context: CommandContext): Promise<CommandResult> {
         const history = context.historyManager.getHistory();
-        if (history.length < 4) return { status: 'error', message: '💡 内容过少，无需折叠。' };
+        if (history.length < 4) return { status: 'error', message: '💡 内容过少，无需固化状态。' };
 
-        await context.webview.postMessage({ type: 'aiResponse', value: '⏳ 正在进行上下文压缩...' });
+        await context.webview.postMessage({ type: 'aiResponse', value: '⏳ 正在构建 XML 状态快照 (Mirroring)...' });
 
         try {
             const compressPrompt = await TemplateManager.loadTemplate(context.extensionUri, 'commands_prompt/compress_prompt.md');
             
+            // 构造一个特殊的压缩历史
             const tempHistory = [...history, { role: 'user', content: compressPrompt }];
             const response = await context.ai.generateContentStream(tempHistory as any, () => {}, []);
-            if (!response.content) throw new Error('摘要生成失败');
+            if (!response.content) throw new Error('镜像构建失败');
 
-            const summary = response.content;
+            const mirror = response.content;
             const systemMsg = history.find(m => m.role === 'system');
+            
             const newHistory: any[] = [];
             if (systemMsg) newHistory.push(systemMsg);
-            newHistory.push({ role: 'assistant', content: `[CONVERSATION SUMMARY]\n${summary}` });
+            
+            // 注入镜像作为唯一的会话记忆
+            newHistory.push({ 
+                role: 'assistant', 
+                content: `[STATE_SNAPSHOT]\n${mirror}` 
+            });
 
             context.historyManager.loadHistory(newHistory);
             await context.webview.postMessage({ type: 'clearView' });
-            await context.webview.postMessage({ type: 'restoreHistory', value: [{ role: 'ai', content: `✅ 会话已折叠：\n\n${summary}` }] });
+            await context.webview.postMessage({ type: 'restoreHistory', value: [{ role: 'ai', content: `✅ **状态已固化 (Mirror Set)**\n\n上下文已压缩为状态快照，多余的对话历史已清除。Opengravity 现在拥有一个高度凝聚的记忆。` }] });
+            
+            // 固化到持久化存储
             await context.chatHistoryService.saveCheckpoint('session_history', newHistory);
 
             return { status: 'success' };
         } catch (error: any) {
-            Logger.error(`[OPGV] Compression failed: ${error.message}`);
-            return { status: 'error', message: `❌ 压缩失败: ${error.message}` };
+            Logger.error(`[OPGV] Mirroring failed: ${error.message}`);
+            return { status: 'error', message: `❌ 固化失败: ${error.message}` };
         }
     }
 }

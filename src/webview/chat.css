@@ -249,6 +249,7 @@ code {
     max-height: 150px;
     z-index: 2;
     position: relative;
+    padding-right: 30px; /* [UI 修复] 同步换行边界 */
 }
 
 #input-highlighter {
@@ -264,9 +265,9 @@ code {
 }
 
 /* 高亮颜色定义 */
-.hl-slash { color: var(--accent-blue); font-weight: bold; }
-.hl-at { color: var(--accent-green); font-weight: bold; }
-.hl-shell { color: var(--accent-red); font-weight: bold; }
+.hl-slash { color: var(--accent-blue); }
+.hl-at { color: var(--accent-green); }
+.hl-shell { color: var(--accent-red); }
 
 .approval-widget { margin-top: 12px; }
 .approval-buttons { display: flex; gap: 8px; }
@@ -274,3 +275,57 @@ code {
 .btn:hover { opacity: 0.8; }
 .btn-primary { background: var(--accent-blue); }
 .btn-danger { color: var(--accent-red); background: rgba(255, 69, 58, 0.1); border: 1px solid rgba(255, 69, 58, 0.2); }
+
+/* --- IntelliSense Styles --- */
+#suggestions-box {
+    position: absolute;
+    bottom: 70px;
+    left: 10px;
+    right: 10px;
+    background: var(--vscode-sideBar-background);
+    border: 1px solid var(--vscode-panel-border);
+    border-radius: 4px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+    z-index: 1000;
+    max-height: 200px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+}
+
+#suggestions-box.hidden {
+    display: none;
+}
+
+.suggestion-item {
+    padding: 6px 10px;
+    cursor: pointer;
+    font-size: 12px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 1px solid var(--vscode-panel-border);
+}
+
+.suggestion-item:last-child {
+    border-bottom: none;
+}
+
+.suggestion-item.active {
+    background: var(--vscode-list-activeSelectionBackground);
+    color: var(--vscode-list-activeSelectionForeground);
+}
+
+.suggestion-label {
+    font-weight: bold;
+    color: var(--accent-blue);
+}
+
+.suggestion-desc {
+    font-size: 10px;
+    opacity: 0.6;
+    margin-left: 10px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}

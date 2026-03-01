@@ -3,7 +3,7 @@ import { SessionStateManager} from './StateManager';
 import { Logger } from '../utils/logger';
 
 /**
- * HeartbeatManager: Aria 的时间脉搏
+ * HeartbeatManager: Opengravity 的时间脉搏
  * 负责周期性触发环境感知逻辑
  */
 export class HeartbeatManager {
