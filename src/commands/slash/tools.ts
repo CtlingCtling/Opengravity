@@ -29,8 +29,7 @@ export class ToolsCommand implements ICommand {
                 mcp_tools: mcpList || "_暂无外部工具_"
             });
 
-            await context.webview.postMessage({ type: 'aiResponse', value: message });
-            return { status: 'success' };
+            return { status: 'success', message: message };
         } catch (error: any) {
             return { status: 'error', message: `获取工具列表失败: ${error.message}` };
         }

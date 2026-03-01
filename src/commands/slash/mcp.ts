@@ -32,7 +32,6 @@ export class McpCommand implements ICommand {
     }
 
     private async handleRefresh(context: CommandContext): Promise<CommandResult> {
-        await context.webview.postMessage({ type: 'aiResponse', value: '⏳ 正在重连所有 MCP 服务器...' });
         try {
             await context.mcp.reload();
             const servers = context.mcp.getServerNames();
@@ -44,7 +43,6 @@ export class McpCommand implements ICommand {
 
     private async handleExplain(context: CommandContext): Promise<CommandResult> {
         const explanation = await TemplateManager.loadTemplate(context.extensionUri, 'commands_prompt/mcp_explanation.md');
-        await context.webview.postMessage({ type: 'aiResponse', value: explanation });
-        return { status: 'success' };
+        return { status: 'success', message: explanation };
     }
 }

@@ -1,5 +1,21 @@
 ## 🚀 Next Up: 阶段性目标 (核心能力演进)
 
+### 🏁 Phase: Version Zero (MVP Polish) @priority:critical
+- [ ] **初始化逻辑重构 (Init 2.0)**:
+  *   **工作区预检**: 若无 `.opengravity` 文件夹，Webview 显示“未选定 Opengravity 工作区”。
+  *   **延迟同步**: 在运行 `/init` 之前，不自动粘贴 skill 和 toml 文件。
+- [ ] **内存压缩系统 (Advanced Compression)**:
+  *   **State Snapshot**: 借鉴 Gemini CLI，将 `/compress` 升级为结构化 XML 快照。
+- [ ] **时间感知增强**:
+  *   **主动查询**: 实现 `get_time` 机制，让 Aria 随时拥有时间观念（非仅依赖心跳注入）。
+- [ ] **冗余清理**: 找到并彻底移除 `agents/code_reviewer.md` 及其关联逻辑。
+- [ ] **交互验证**: 确认 `read_file` 免审批逻辑已实现且具有视觉反馈。
+- [ ] **品牌与文档**: 
+  *   **Icon**: 为 Opengravity 寻找/设计一个精致的图标。
+  *   **README**: 撰写详细的技术架构说明与操作指南。
+
+---
+
 - [x] **Phase 3: 全面支持 MCP (Tools, Prompts, Resources)** @priority:critical
 - [x] **Phase 4: 工业级稳定性保障 (完善测试覆盖)** @priority:high
 - [x] **Phase 5: 完整指令功能系统 (Command Power-user)** @priority:critical
@@ -31,9 +47,9 @@
 - [ ] **Phase 11: 任务自主与生命节律 (Autonomy & Heartbeat)** @priority:medium
   - [ ] **`/auto` 指令**: 开启自主执行循环，允许 Agent 独立完成已规划的连续任务。
   - [ ] **`/explore` 指令**: 激发好奇心引擎，利用联网 MCP 进行自主调研与知识发现。
-  - [ ] **Heartbeat 引擎**: 实现基于定时器的静默注入机制，周期性唤醒 Aria 进行环境感知。
+  - [ ] **Heartbeat 引擎**: 实现基于定时器的静默注入机制，周期性唤醒 Opengravity 进行环境感知。
   - [ ] **状态机集成 (`/shutup`)**: 增加 `is_automatic` 状态锁，精确控制主动发言权限与协议注入。
-  - [ ] **建立自检协议**: 创建 `HEARTBEAT.md` 模板，定义 Aria 在心跳触发时的观察清单与决策边界。
+  - [ ] **建立自检协议**: 创建 `HEARTBEAT.md` 模板，定义 Opengravity 在心跳触发时的观察清单与决策边界。
   - [ ] **安全围栏**: 为自主模式设置资源配额与人工强断开关。
 
 ---

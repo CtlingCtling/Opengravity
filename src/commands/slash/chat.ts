@@ -3,7 +3,7 @@ import * as vscode from 'vscode';
 
 /**
  * ChatCommand: 会话管理指令集
- * 包含 save, list, resume, delete, share功能
+ * 包含 save, list, resume, delete, share 功能
  */
 export class ChatCommand implements ICommand {
     name = 'chat';
@@ -37,7 +37,7 @@ export class ChatCommand implements ICommand {
 
         const success = await context.chatHistoryService.saveCheckpoint(tag, context.historyManager.getHistory());
         if (success) {
-            return { status: 'success', message: `✅ 会话快照已保存: ${tag}` };
+            return { status: 'success', message: `✅ 会话快照已保存: \`${tag}\`` };
         }
         return { status: 'error', message: `❌ 保存失败，请检查日志。` };
     }
@@ -64,7 +64,7 @@ export class ChatCommand implements ICommand {
 
         const success = await context.chatHistoryService.deleteCheckpoint(tag);
         if (success) {
-            return { status: 'success', message: `🗑️ 会话快照已删除: ${tag}` };
+            return { status: 'success', message: `🗑️ 会话快照 \`${tag}\` 已删除。` };
         }
         return { status: 'error', message: `❌ 删除失败。` };
     }
@@ -76,7 +76,7 @@ export class ChatCommand implements ICommand {
         // 1. 安全确认：告知用户 KV Cache 将丢失
         const confirm = await vscode.window.showWarningMessage(
             `[⚠️] 确认恢复会话 "${tag}"?
-恢复后，当前对话的 KV Cache (上下文缓存) 将丢失，模型性能将重置。`,
+恢复后，当前对话的上下文缓存将丢失，系统状态将回滚到快照时刻。`,
             { modal: true },
             '确认恢复'
         );
@@ -104,7 +104,7 @@ export class ChatCommand implements ICommand {
         
         context.webview.postMessage({ type: 'restoreHistory', value: displayHistory });
 
-        return { status: 'success', message: `🔄 已恢复会话快照: ${tag}` };
+        return { status: 'success', message: `🔄 已恢复会话快照: \`${tag}\`` };
     }
 
     private async handleShare(args: string[], context: CommandContext): Promise<CommandResult> {
@@ -116,8 +116,6 @@ export class ChatCommand implements ICommand {
         const rootPath = vscode.workspace.workspaceFolders?.[0].uri.fsPath;
         if (!rootPath) { return { status: 'error', message: '❌ 未打开工作区，无法保存文件。' }; }
 
-        const reviewsDir = vscode.Uri.joinPath(context.extensionUri, '..', '..', 'reviews').fsPath; // 向上跳转寻找主目录下的 reviews
-        // 注意：在 VSCode 扩展中，通常建议保存到工作区目录
         const targetDir = require('path').join(rootPath, 'reviews');
         const fileName = args[0] || `share_${Date.now()}.md`;
         const filePath = require('path').join(targetDir, fileName.endsWith('.md') ? fileName : `${fileName}.md`);
@@ -125,16 +123,16 @@ export class ChatCommand implements ICommand {
         try {
             await vscode.workspace.fs.createDirectory(vscode.Uri.file(targetDir));
             
-            let markdown = `# Opengravity Chat Export\n\nDate: ${new Date().toLocaleString()}\n\n---\n\n`;
+            let markdown = `# Opengravity Session Export\n\nDate: ${new Date().toLocaleString()}\n\n---\n\n`;
             
-            history.forEach((msg, index) => {
+            history.forEach((msg) => {
                 if (msg.role === 'system') { return; }
                 
-                const roleName = msg.role === 'assistant' ? '🤖 Assistant' : msg.role === 'user' ? '👤 User' : `🔧 Tool (${msg.tool_call_id})`;
+                const roleName = msg.role === 'assistant' ? 'OPENGRAVITY' : msg.role === 'user' ? 'USER' : `TOOL_CALL (${msg.tool_call_id})`;
                 markdown += `### [${roleName}]\n\n${msg.content || ''}\n\n`;
                 
                 if (msg.tool_calls) {
-                    markdown += `> **Action:** Calls ${msg.tool_calls.length} tools...\n\n`;
+                    markdown += `> **System:** Invoked ${msg.tool_calls.length} tools.\n\n`;
                 }
                 
                 markdown += '---\n\n';
@@ -143,9 +141,10 @@ export class ChatCommand implements ICommand {
             const encoder = new TextEncoder();
             await vscode.workspace.fs.writeFile(vscode.Uri.file(filePath), encoder.encode(markdown));
 
-            return { status: 'success', message: `📤 对话已导出至: \`${require('path').relative(rootPath, filePath)}\`` };
+            return { status: 'success', message: `📤 对话已导出至: \`reviews/${require('path').basename(filePath)}\`` };
         } catch (error: any) {
             return { status: 'error', message: `❌ 导出失败: ${error.message}` };
         }
     }
 }
+

@@ -11,7 +11,7 @@ import { HistoryManager } from './session/HistoryManager';
 import { ChatHistoryService } from './services/ChatHistoryService'; 
 import { DiffContentProvider } from './utils/diffProvider';
 import { TemplateManager } from './utils/templateManager';
-import { SessionStateManager, AriaMode } from './session/StateManager';
+import { SessionStateManager, OpengravityMode } from './session/StateManager';
 import { HeartbeatManager } from './session/HeartbeatManager';
 
 export class ChatViewProvider implements vscode.WebviewViewProvider {
@@ -47,6 +47,9 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     public async resolveWebviewView(webviewView: vscode.WebviewView) {
         this._view = webviewView;
         await this._stateManager.initialize();
+
+        // [UI 同步] 发送初始模式
+        this._postWebviewMessage('updateMode', this._stateManager.mode);
 
         if (!this._heartbeatManager) {
             this._heartbeatManager = new HeartbeatManager(
@@ -228,7 +231,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
             const aiResponse = await provider.generateContentStream(sanitizedHistory, onUpdate, allTools);
 
             if (aiResponse.content === 'HEARTBEAT_OK') {
-                Logger.info("[HEARTBEAT] Aria said OK.");
+                Logger.info("[HEARTBEAT] Opengravity said OK.");
                 return; 
             }
 
@@ -310,9 +313,9 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     }
 
     private async _executeToolCalls(toolCalls: any[]) {
-        this._postWebviewMessage('streamUpdate', `\n\n> 🔧 **OPGV Action:** Processing ${toolCalls.length} tools...\n`, 'content');
+        this._postWebviewMessage('streamUpdate', `Processing ${toolCalls.length} tools...`, 'tool_status');
         for (const tc of toolCalls) {
-            this._historyManager.addItem({ role: 'tool', tool_call_id: tc.id, content: "[EXECUTING] Initializing tool..." });
+            this._historyManager.addItem({ role: 'tool', tool_call_id: tc.id, content: "[EXECUTING]" });
         }
 
         let isInterrupted = false;
@@ -323,41 +326,74 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
             let args;
 
             if (isInterrupted) {
-                this._historyManager.updateToolResult(toolCall.id, "[SKIPPED] Action pending approval.");
+                this._historyManager.updateToolResult(toolCall.id, "[SKIPPED]");
                 continue;
             }
 
             try {
                 args = JSON.parse(toolCall.function.arguments);
             } catch (e: any) {
-                result = `[ERROR] Failed to parse arguments: ${e.message}`;
-                this._historyManager.updateToolResult(toolCall.id, result);
+                this._historyManager.updateToolResult(toolCall.id, `[ERROR] ${e.message}`);
                 continue; 
             }
 
             if (funcName === 'read_file') {
+                this._postWebviewMessage('streamUpdate', `Reading \`${args.path}\`...`, 'tool_status');
                 result = await ToolExecutor.read_file(args);
+                this._postWebviewMessage('streamUpdate', `Preview: \n\`\`\`\n${result.slice(0, 300)}...\n\`\`\``, 'tool_status');
             } else if (funcName === 'write_file') {
+                this._postWebviewMessage('streamUpdate', `Writing to \`${args.path}\`...`, 'tool_status');
                 result = await ToolExecutor.write_file(args);
+                this._postWebviewMessage('streamUpdate', `Success.`, 'tool_status');
             } else if (funcName === 'replace') {
+                // [高级极简 Diff] 获取上下文并手动标记染色
+                const fullPath = (ToolExecutor as any).getSafePath(args.path);
+                let diffMd = "";
+                try {
+                    const fullContent = await fs.promises.readFile(fullPath, 'utf-8');
+                    const lines = fullContent.split('\n');
+                    const index = fullContent.indexOf(args.old_string);
+                    if (index !== -1) {
+                        const startLine = fullContent.slice(0, index).split('\n').length;
+                        const oldLines = args.old_string.split('\n');
+                        const newLines = args.new_string.split('\n');
+                        const endLine = startLine + oldLines.length - 1;
+
+                        const contextBefore = lines.slice(Math.max(0, startLine - 3), startLine - 1);
+                        const contextAfter = lines.slice(endLine, Math.min(lines.length, endLine + 2));
+
+                        diffMd = `Proposed changes for \`${args.path}\`:\n\n\`\`\`diff\n`;
+                        contextBefore.forEach((l: string) => diffMd += `  ${l}\n`);
+                        oldLines.forEach((l: string) => diffMd += `-${l}\n`);
+                        newLines.forEach((l: string) => diffMd += `+${l}\n`);
+                        contextAfter.forEach((l: string) => diffMd += `  ${l}\n`);
+                        diffMd += "```";
+                    }
+                } catch (e) {
+                    diffMd = `Proposed changes for \`${args.path}\` (context unavailable):\n\n\`\`\`diff\n-${args.old_string}\n+${args.new_string}\n\`\`\``;
+                }
+                
+                this._postWebviewMessage('streamUpdate', diffMd, 'diff');
+
                 if (this._stateManager.isAutonomous()) {
-                    Logger.info(`[AUTONOMOUS] Applying replace to ${args.path}`);
                     result = await ToolExecutor.replace(args);
+                    this._historyManager.updateToolResult(toolCall.id, result);
+                    continue; // 关键：执行完后立刻跳到下一个工具，不要进下面的 Manual 逻辑
                 } else {
                     this._isWaitingForApproval = true;
                     this._pendingToolCallId = toolCall.id;
-                    const fullPath = (ToolExecutor as any).getSafePath(args.path);
-                    if (fullPath) {
+                    const fullPathSafe = (ToolExecutor as any).getSafePath(args.path);
+                    if (fullPathSafe) {
                         try {
-                            const content = await fs.promises.readFile(fullPath, 'utf-8');
+                            const content = await fs.promises.readFile(fullPathSafe, 'utf-8');
                             const firstIndex = content.indexOf(args.old_string);
-                            if (firstIndex !== -1 && content.lastIndexOf(args.old_string) === firstIndex) {
+                            if (firstIndex !== -1) {
                                 const newContent = content.slice(0, firstIndex) + args.new_string + content.slice(firstIndex + args.old_string.length);
-                                const uri = vscode.Uri.file(fullPath);
+                                const uri = vscode.Uri.file(fullPathSafe);
                                 const diffUri = DiffContentProvider.register(uri, newContent);
                                 this._pendingDiff = { originalUri: uri, newContent, diffUri };
                             }
-                        } catch (e) { Logger.error(`[OPGV] Pre-diff error: ${e}`); }
+                        } catch (e) {}
                     }
                     result = await ToolExecutor.replace(args);
                     this._postWebviewMessage('showApprovalPanel', undefined);
@@ -369,10 +405,6 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
                 result = await ToolExecutor.run_command(args, (chunk) => {
                     this._postWebviewMessage('streamUpdate', chunk, 'terminal');
                 });
-            } else if (funcName === 'get_mcp_prompt') {
-                result = await this._mcpHost.getPromptContent(args.server_name, args.prompt_name, args.arguments);
-            } else if (funcName === 'get_mcp_resource') {
-                result = await this._mcpHost.getResourceContent(args.server_name, args.uri);
             } else {
                 result = await this._mcpHost.executeTool(funcName, args);
             }

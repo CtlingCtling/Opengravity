@@ -4,15 +4,21 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="stylesheet" href="{{styleUri}}">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <script src="{{purifyUri}}"></script>
     <script src="{{ansiUpUri}}"></script> 
 </head>
 <body>
+    <div id="status-bar">
+        Opengravity mode: <span id="status-mode">Manual</span>
+    </div>
     <div id="chat-box"></div>
     
     <div id="input-area">
         <div class="input-wrapper">
+            <div id="input-highlighter"></div>
             <textarea id="input" placeholder="⌥ + Enter to Send" rows="1"></textarea>
         </div>
     </div>

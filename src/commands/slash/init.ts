@@ -27,7 +27,10 @@ export class InitCommand implements ICommand {
                 await vscode.workspace.fs.createDirectory(vscode.Uri.joinPath(rootPath, folder));
             }
 
-            const successMsg = await TemplateManager.loadTemplate(context.extensionUri, 'commands/init_success.md');
+            // [核心增强] 同步并初始化 .opengravity 配置文件
+            await TemplateManager.ensureConfigDir(context.extensionUri);
+
+            const successMsg = await TemplateManager.loadTemplate(context.extensionUri, 'commands_prompt/init_success.md');
             await context.webview.postMessage({ type: 'aiResponse', value: successMsg });
 
             return { status: 'success' };

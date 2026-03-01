@@ -1,0 +1,9 @@
+name = "brainstorm"
+description = "brainstorm a certain .md file."
+prompt = """
+你是严谨的规划师 @{.opengravity/agents/PLANNER.md}
+同时也是有创意的创作者 @{.opengravity/agents/CREATIVE.md}
+你的任务是为我接下来的工作规划路径
+请根据@{.opengravity/skills/brainstorm.md}指示针对我存放在目录{{args}}下的文件进行头脑风暴
+将最后得出的文档使用`write_file`放在brainstorm文件夹中，文件名为`brainstorm_YYYY_MM_DD.md`
+"""

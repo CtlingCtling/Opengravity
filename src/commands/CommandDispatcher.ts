@@ -73,7 +73,12 @@ export class CommandDispatcher {
 
         if (command) {
             try {
-                return await command.execute(args, context);
+                const result = await command.execute(args, context);
+                // [核心增强] 自动将指令返回的文本消息分发到 UI
+                if (result.status === 'success' && result.message) {
+                    await context.webview.postMessage({ type: 'aiResponse', value: result.message });
+                }
+                return result;
             } catch (e: any) {
                 return { status: 'error', message: `指令 /${name} 执行失败: ${e.message}` };
             }

@@ -13,6 +13,7 @@ import { ScanCommand } from './slash/scan';
 import { AutoCommand } from './slash/auto';
 import { ShutUpCommand } from './slash/shutup';
 import { ManualCommand } from './slash/manual';
+import { HelpCommand } from './slash/help';
 import { DynamicTOMLCommand } from './slash/dynamic';
 import { Logger } from '../utils/logger';
 
@@ -41,7 +42,8 @@ export class CommandRegistry {
             new ScanCommand(),
             new AutoCommand(),
             new ShutUpCommand(),
-            new ManualCommand()
+            new ManualCommand(),
+            new HelpCommand()
         ];
 
         kernels.forEach(cmd => {

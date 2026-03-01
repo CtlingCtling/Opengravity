@@ -36,7 +36,6 @@ export class CommandsCommand implements ICommand {
         const rawTemplate = await TemplateManager.loadTemplate(context.extensionUri, 'commands_prompt/commands_list.md');
         const content = await TemplateManager.render(rawTemplate, { commands: commandList });
 
-        await context.webview.postMessage({ type: 'aiResponse', value: content });
-        return { status: 'success' };
+        return { status: 'success', message: content };
     }
 }

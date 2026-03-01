@@ -1,5 +1,23 @@
+# Build and output
 out
 dist
 node_modules
-.vscode-test/
 *.vsix
+
+# VSCode
+.vscode-test/
+.history/
+*.log
+
+# System
+.DS_Store
+Thumbs.db
+
+# Opengravity Runtime
+.opengravity/sessions/
+.opengravity/memory/
+.opengravity/state.json
+
+# Environment
+.env
+.env.local

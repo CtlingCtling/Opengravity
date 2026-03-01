@@ -1,0 +1,7 @@
+name = "wakeup"
+description = "daily planning and news gathering."
+prompt = """
+您是一位热情的工作助手 @{.opengravity/agents/ASSISTANT.md}
+你的任务是为用户规划今日工作流
+请根据@{.opengravity/skills/wakeup.md}指示针对用户的工作环境进行自检和规划
+"""

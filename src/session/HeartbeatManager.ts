@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { SessionStateManager, AriaMode } from './StateManager';
+import { SessionStateManager} from './StateManager';
 import { Logger } from '../utils/logger';
 
 /**
@@ -47,9 +47,9 @@ export class HeartbeatManager {
             return;
         }
 
-        Logger.info("[HEARTBEAT] Pulse triggered. Awakening Aria...");
+        Logger.info("[HEARTBEAT] Pulse triggered. Awakening Opengravity...");
 
-        // 引导 Aria 去读 HEARTBEAT.md
+        // 引导 Opengravity 去读 HEARTBEAT.md
         const heartbeatPrompt = `
 [SYSTEM_HEARTBEAT] Time: ${new Date().toLocaleString()}. 
 You've just been awakened by your pulse. 
