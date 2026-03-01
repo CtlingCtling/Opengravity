@@ -3,8 +3,10 @@
   "displayName": "Opengravity",
   "description": "An AI workflow platform.",
   "version": "0.1.0",
+  "publisher": "ctling",
+  "icon": "media/logo.svg",
   "engines": {
-    "vscode": "^1.109.5"
+    "vscode": "^1.93.0"
   },
   "activationEvents": [
     "onView:opengravity.chatView",
@@ -17,7 +19,7 @@
         {
           "id": "opengravity-sidebar",
           "title": "Opengravity",
-          "icon": "media/icon.png"
+          "icon": "media/icon.svg"
         }
       ]
     },
@@ -27,7 +29,7 @@
           "type": "webview",
           "id": "opengravity.chatView",
           "name": "Chat",
-          "icon": "media/icon.png"
+          "icon": "media/icon.svg"
         }
       ]
     },
@@ -101,7 +103,7 @@
     "@types/jest": "^29.5.11",
     "@types/mocha": "^10.0.10",
     "@types/node": "^25.1.0",
-    "@types/vscode": "^1.108.1",
+    "@types/vscode": "^1.93.0",
     "@vscode/test-cli": "^0.0.12",
     "@vscode/test-electron": "^2.5.2",
     "eslint": "^9.39.2",

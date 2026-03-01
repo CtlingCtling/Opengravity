@@ -5,12 +5,12 @@
 - **Markers**: {{markers}}
 
 {{#if isEngineering}}
-## 🏗️ ARCHITECTURE (Blueprint)
+## 🏗️ ARCHITECTURE
 ```mermaid
 {{blueprint}}
 ```
 
-## 🧠 KNOWLEDGE GRAPH (Symbols)
+## 🧠 KNOWLEDGE GRAPH
 ```mermaid
 {{knowledge_graph}}
 ```
