@@ -6,6 +6,13 @@ src/**
 vsc-extension-quickstart.md
 **/tsconfig.json
 **/eslint.config.mjs
+**/jest.config.js
 **/*.map
 **/*.ts
 **/.vscode-test.*
+TODO.md
+.opengravity/**
+debug_spawn.js
+*.vsix
+.DS_Store
+**/ .DS_Store

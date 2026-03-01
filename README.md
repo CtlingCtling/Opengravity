@@ -87,4 +87,5 @@ Opengravity 赞同 OpenClaw 的部分有关 Agent 自主性的看法，并且在
 
 ---
 
-$\mathcal{Code\quad with}$ ❤️ $\mathcal{by\quad Ctling\quad \&\quad Echo.}$ 
+$\mathcal{Code\quad with}$ ❤️ 
+$\mathcal{by\quad Ctling\quad \&\quad Echo.}$ 
