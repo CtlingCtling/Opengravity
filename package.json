@@ -4,7 +4,12 @@
   "description": "An AI workflow platform.",
   "version": "0.1.0",
   "publisher": "ctling",
-  "icon": "media/logo.svg",
+  "icon": "media/logo.png",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/CtlingCtling/Opengravity.git"
+  },
   "engines": {
     "vscode": "^1.93.0"
   },
