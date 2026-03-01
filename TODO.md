@@ -1,15 +1,15 @@
 ## 🚀 Next Up: 阶段性目标 (核心能力演进)
 
 ### 🏁 Phase: Version Zero (MVP Polish) @priority:critical
-- [ ] **初始化逻辑重构 (Init 2.0)**:
+- [x] **初始化逻辑重构 (Init 2.0)**:
   *   **工作区预检**: 若无 `.opengravity` 文件夹，Webview 显示“未选定 Opengravity 工作区”。
   *   **延迟同步**: 在运行 `/init` 之前，不自动粘贴 skill 和 toml 文件。
 - [ ] **内存压缩系统 (Advanced Compression)**:
   *   **State Snapshot**: 借鉴 Gemini CLI，将 `/compress` 升级为结构化 XML 快照。
-- [ ] **时间感知增强**:
+- [x] **时间感知增强**:
   *   **主动查询**: 实现 `get_time` 机制，让 Aria 随时拥有时间观念（非仅依赖心跳注入）。
-- [ ] **冗余清理**: 找到并彻底移除 `agents/code_reviewer.md` 及其关联逻辑。
-- [ ] **交互验证**: 确认 `read_file` 免审批逻辑已实现且具有视觉反馈。
+- [x] **冗余清理**: 找到并彻底移除 `agents/code_reviewer.md` 及其关联逻辑。
+- [x] **交互验证**: 确认 `read_file` 免审批逻辑已实现且具有视觉反馈。
 - [ ] **品牌与文档**: 
   *   **Icon**: 为 Opengravity 寻找/设计一个精致的图标。
   *   **README**: 撰写详细的技术架构说明与操作指南。

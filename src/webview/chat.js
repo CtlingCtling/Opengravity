@@ -18,12 +18,39 @@ const inputHighlighter = document.getElementById('input-highlighter');
 // --- Global State ---
 let currentStreamMsg = null;
 let markdownBuffer = "";
+let hasInitPrompted = false; // [新增] 防止重复提示
 
 // --- Status Bar ---
 function updateStatusBar(mode) {
     const modeEl = document.getElementById('status-mode');
     if (modeEl) {
         modeEl.textContent = mode.charAt(0).toUpperCase() + mode.slice(1);
+    }
+}
+
+// --- Overlay Control ---
+function updateOverlay(status) {
+    const overlay = document.getElementById('overlay');
+    const msg = document.getElementById('overlay-message');
+    const icon = document.getElementById('overlay-icon');
+
+    switch (status) {
+        case 'no-workspace':
+            overlay.classList.remove('hidden');
+            overlay.style.backgroundColor = 'rgba(128, 0, 0, 0.9)'; // 红色半透明
+            icon.textContent = '🚫';
+            msg.innerHTML = '<strong>No main folder for workspace.</strong><br>Please open a folder to use Opengravity.';
+            break;
+        case 'not-initialized':
+            overlay.classList.remove('hidden');
+            overlay.style.backgroundColor = 'var(--vscode-sideBar-background)';
+            icon.textContent = '🛠️';
+            msg.innerHTML = '<strong>Aria is waiting.</strong><br>Type <span style="color:var(--accent-blue)">/init</span> to start your workflow.';
+            break;
+        case 'initialized':
+        case 'commands-reloaded':
+            overlay.classList.add('hidden');
+            break;
     }
 }
 
@@ -246,6 +273,15 @@ window.addEventListener('message', event => {
     switch (msg.type) {
         case 'updateMode':
             updateStatusBar(msg.value);
+            break;
+
+        case 'updateStatus':
+            if (msg.value === 'no-workspace') {
+                appendMessage('system', '🚫 **No workspace folder open.** Opengravity requires a project folder to function.');
+            } else if (msg.value === 'not-initialized' && !hasInitPrompted) {
+                appendMessage('ai', '🌌 **Welcome.** Your workspace is structurally ready, but the project workflow is not yet active. Type `/init` to begin.');
+                hasInitPrompted = true;
+            }
             break;
 
         case 'aiResponse':

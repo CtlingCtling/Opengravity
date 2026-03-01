@@ -51,6 +51,12 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         // [UI 同步] 发送初始模式
         this._postWebviewMessage('updateMode', this._stateManager.mode);
 
+        // [Init 2.0] 初始化预检
+        const workflowReady = await TemplateManager.isWorkflowInitialized();
+        if (!workflowReady) {
+            this._postWebviewMessage('updateStatus', 'not-initialized');
+        }
+
         if (!this._heartbeatManager) {
             this._heartbeatManager = new HeartbeatManager(
                 this._stateManager,
@@ -72,6 +78,19 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         webviewView.webview.onDidReceiveMessage(async (data) => {
             switch (data.type) {
                 case 'webviewLoaded':
+                    // [Init 2.0] 握手：Webview 就绪后立即同步环境状态
+                    const hasWorkspace = vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders.length > 0;
+                    if (!hasWorkspace) {
+                        this.postState('no-workspace');
+                    } else {
+                        const workflowReady = await TemplateManager.isWorkflowInitialized();
+                        this.postState(workflowReady ? 'initialized' : 'not-initialized');
+                    }
+
+                    // [UI 同步] 发送当前模式
+                    this._postWebviewMessage('updateMode', this._stateManager.mode);
+
+                    // 恢复历史
                     const currentHistory = this._historyManager.getHistory();
                     if (currentHistory.length > 0) {
                         this._postWebviewMessage(
@@ -264,6 +283,21 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         this._postWebviewMessage('error', err.message || 'An unknown error occurred.');
     }
 
+    /**
+     * 发送环境状态给 Webview (Init 2.0)
+     */
+    public postState(state: 'no-workspace' | 'not-initialized' | 'initialized') {
+        this._postWebviewMessage('updateStatus', state);
+    }
+
+    /**
+     * 对外接口：重新加载指令集 (用于 /init 后的热重载)
+     */
+    public async reloadCommands() {
+        await this._commandDispatcher.reload();
+        this._postWebviewMessage('updateStatus', 'commands-reloaded');
+    }
+
     public async refreshSystemPrompt() {
         this._historyManager.clearHistory();
         this._systemPrompt = await TemplateManager.getSystemPrompt(this._extensionUri);
@@ -338,50 +372,57 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
             }
 
             if (funcName === 'read_file') {
-                this._postWebviewMessage('streamUpdate', `Reading \`${args.path}\`...`, 'tool_status');
+                this._postWebviewMessage('streamUpdate', `🔍 **Reading**: \`${args.path}\`...`, 'tool_status');
                 result = await ToolExecutor.read_file(args);
-                this._postWebviewMessage('streamUpdate', `Preview: \n\`\`\`\n${result.slice(0, 300)}...\n\`\`\``, 'tool_status');
+                this._postWebviewMessage('streamUpdate', `✅ **Read Complete**: \`${args.path}\` (${result.length} bytes)`, 'tool_status');
             } else if (funcName === 'write_file') {
                 this._postWebviewMessage('streamUpdate', `Writing to \`${args.path}\`...`, 'tool_status');
                 result = await ToolExecutor.write_file(args);
                 this._postWebviewMessage('streamUpdate', `Success.`, 'tool_status');
             } else if (funcName === 'replace') {
-                // [高级极简 Diff] 获取上下文并手动标记染色
-                const fullPath = (ToolExecutor as any).getSafePath(args.path);
-                let diffMd = "";
-                try {
-                    const fullContent = await fs.promises.readFile(fullPath, 'utf-8');
-                    const lines = fullContent.split('\n');
-                    const index = fullContent.indexOf(args.old_string);
-                    if (index !== -1) {
-                        const startLine = fullContent.slice(0, index).split('\n').length;
-                        const oldLines = args.old_string.split('\n');
-                        const newLines = args.new_string.split('\n');
-                        const endLine = startLine + oldLines.length - 1;
+                const isAuto = this._stateManager.isAutonomous();
+                const isPersonalityFile = args.path.startsWith('.opengravity/');
 
-                        const contextBefore = lines.slice(Math.max(0, startLine - 3), startLine - 1);
-                        const contextAfter = lines.slice(endLine, Math.min(lines.length, endLine + 2));
-
-                        diffMd = `Proposed changes for \`${args.path}\`:\n\n\`\`\`diff\n`;
-                        contextBefore.forEach((l: string) => diffMd += `  ${l}\n`);
-                        oldLines.forEach((l: string) => diffMd += `-${l}\n`);
-                        newLines.forEach((l: string) => diffMd += `+${l}\n`);
-                        contextAfter.forEach((l: string) => diffMd += `  ${l}\n`);
-                        diffMd += "```";
+                // [高级逻辑] 自进化特权：如果是人格文件或处于自动模式，免审批执行
+                if (isAuto || isPersonalityFile) {
+                    if (isPersonalityFile && !isAuto) {
+                        Logger.info(`[SELF-EVOLUTION] Aria is updating her personality: ${args.path}`);
                     }
-                } catch (e) {
-                    diffMd = `Proposed changes for \`${args.path}\` (context unavailable):\n\n\`\`\`diff\n-${args.old_string}\n+${args.new_string}\n\`\`\``;
-                }
-                
-                this._postWebviewMessage('streamUpdate', diffMd, 'diff');
-
-                if (this._stateManager.isAutonomous()) {
                     result = await ToolExecutor.replace(args);
-                    this._historyManager.updateToolResult(toolCall.id, result);
-                    continue; // 关键：执行完后立刻跳到下一个工具，不要进下面的 Manual 逻辑
                 } else {
+                    // 修改业务代码且处于 Manual 模式：必须审批
                     this._isWaitingForApproval = true;
                     this._pendingToolCallId = toolCall.id;
+
+                    // 获取上下文并手动标记染色 (Diff 预览)
+                    const fullPath = (ToolExecutor as any).getSafePath(args.path);
+                    let diffMd = "";
+                    try {
+                        const fullContent = await fs.promises.readFile(fullPath, 'utf-8');
+                        const lines = fullContent.split('\n');
+                        const index = fullContent.indexOf(args.old_string);
+                        if (index !== -1) {
+                            const startLine = fullContent.slice(0, index).split('\n').length;
+                            const oldLines = args.old_string.split('\n');
+                            const newLines = args.new_string.split('\n');
+                            const endLine = startLine + oldLines.length - 1;
+
+                            const contextBefore = lines.slice(Math.max(0, startLine - 3), startLine - 1);
+                            const contextAfter = lines.slice(endLine, Math.min(lines.length, endLine + 2));
+
+                            diffMd = `Proposed changes for \`${args.path}\`:\n\n\`\`\`diff\n`;
+                            contextBefore.forEach((l: string) => diffMd += `  ${l}\n`);
+                            oldLines.forEach((l: string) => diffMd += `-${l}\n`);
+                            newLines.forEach((l: string) => diffMd += `+${l}\n`);
+                            contextAfter.forEach((l: string) => diffMd += `  ${l}\n`);
+                            diffMd += "```";
+                        }
+                    } catch (e) {
+                        diffMd = `Proposed changes for \`${args.path}\` (context unavailable):\n\n\`\`\`diff\n-${args.old_string}\n+${args.new_string}\n\`\`\``;
+                    }
+
+                    this._postWebviewMessage('streamUpdate', diffMd, 'diff');
+
                     const fullPathSafe = (ToolExecutor as any).getSafePath(args.path);
                     if (fullPathSafe) {
                         try {
@@ -395,13 +436,15 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
                             }
                         } catch (e) {}
                     }
+
                     result = await ToolExecutor.replace(args);
                     this._postWebviewMessage('showApprovalPanel', undefined);
                     this._historyManager.updateToolResult(toolCall.id, result);
                     isInterrupted = true;
                     continue; 
                 }
-            } else if (funcName === 'run_command') {
+            }
+ else if (funcName === 'run_command') {
                 result = await ToolExecutor.run_command(args, (chunk) => {
                     this._postWebviewMessage('streamUpdate', chunk, 'terminal');
                 });

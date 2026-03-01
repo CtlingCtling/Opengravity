@@ -14,6 +14,7 @@ import { AutoCommand } from './slash/auto';
 import { ShutUpCommand } from './slash/shutup';
 import { ManualCommand } from './slash/manual';
 import { HelpCommand } from './slash/help';
+import { AboutCommand } from './slash/about';
 import { DynamicTOMLCommand } from './slash/dynamic';
 import { Logger } from '../utils/logger';
 
@@ -43,7 +44,8 @@ export class CommandRegistry {
             new AutoCommand(),
             new ShutUpCommand(),
             new ManualCommand(),
-            new HelpCommand()
+            new HelpCommand(),
+            new AboutCommand()
         ];
 
         kernels.forEach(cmd => {
@@ -127,6 +129,16 @@ export class CommandRegistry {
 
     getAllCommands(): ICommand[] {
         return Array.from(this.commands.values());
+    }
+
+    /**
+     * 获取格式化的指令列表 (用于 Help/Commands 显示)
+     */
+    getCommandList(): string {
+        return Array.from(this.commands.values())
+            .sort((a, b) => a.name.localeCompare(b.name))
+            .map(c => `- **/${c.name}**: ${c.description}`)
+            .join('\n');
     }
 
     async reload() {

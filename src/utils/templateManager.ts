@@ -111,78 +111,115 @@ export class TemplateManager {
     }
 
     /**
-     * 启动时自检：确保 .opengravity 目录结构与资产对齐
+     * [Init 2.0] 检查业务工作流是否已初始化
+     * 判定标准：检查核心业务目录 codes/ 是否存在
      */
-    static async ensureConfigDir(extensionUri: vscode.Uri) {
+    static async isWorkflowInitialized(): Promise<boolean> {
         const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
-        if (!workspaceFolder) { return; }
-
-        const rootUri = workspaceFolder.uri;
-        const configDirUri = vscode.Uri.joinPath(rootUri, '.opengravity');
-
+        if (!workspaceFolder) return true; 
+        const codesDir = vscode.Uri.joinPath(workspaceFolder.uri, 'codes');
         try {
-            // 1. 确保基础子目录存在 (异步)
-            const baseDirs = ['skills', 'agents', 'codingstyle', 'commands', 'sessions', 'commands_prompt', 'memory'];
-            for (const dir of baseDirs) {
-                const dirUri = vscode.Uri.joinPath(configDirUri, dir);
-                try {
-                    await vscode.workspace.fs.stat(dirUri);
-                } catch (e) {
-                    await vscode.workspace.fs.createDirectory(dirUri);
-                }
-            }
-
-            // 2. 将 assets/templates 内容镜像同步到 .opengravity/ 根部
-            await this.syncDir(
-                vscode.Uri.joinPath(extensionUri, 'assets', 'templates'),
-                configDirUri,
-                "Config Assets"
-            );
-
-            // 3. 将 assets/commands (TOML) 同步到 .opengravity/commands/
-            await this.syncDir(
-                vscode.Uri.joinPath(extensionUri, 'assets', 'commands'),
-                vscode.Uri.joinPath(configDirUri, 'commands'),
-                "Instructions"
-            );
-
-        } catch (error: any) {
-            Logger.error(`[OPGV] Failed to ensure config directory: ${error.message}`);
+            await vscode.workspace.fs.stat(codesDir);
+            return true;
+        } catch (e) {
+            return false;
         }
     }
 
     /**
-     * 通用的目录同步工具
-     * [修复] 仅在文件不存在时进行拷贝，保护用户的自定义修改。
+     * [Soul Sync] 塑造人格：注入灵魂地基
+     * 只要打开工作区就运行。创建完整的 .opengravity 目录结构并同步核心身份文件、人格(Personas)及规范。
      */
+    static async bootstrapSoul(extensionUri: vscode.Uri) {
+        const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+        if (!workspaceFolder) return;
+
+        const configDirUri = vscode.Uri.joinPath(workspaceFolder.uri, '.opengravity');
+        try {
+            // 1. 创建地基：.opengravity 及其所有标准子目录
+            const soulDirs = ['', 'skills', 'agents', 'codingstyle', 'commands', 'sessions', 'commands_prompt', 'memory'];
+            for (const dir of soulDirs) {
+                const dUri = vscode.Uri.joinPath(configDirUri, dir);
+                try { await vscode.workspace.fs.stat(dUri); } catch (e) {
+                    await vscode.workspace.fs.createDirectory(dUri);
+                }
+            }
+            
+            // 2. 注入核心身份文件
+            const identityFiles = ['SYSTEM.md', 'IDENTITY.md', 'USER.md', 'INDEX.md', 'PROJECT_MAP.md', 'MEMORY.md', 'HEARTBEAT.md'];
+            const srcRoot = vscode.Uri.joinPath(extensionUri, 'assets', 'templates');
+            
+            for (const file of identityFiles) {
+                const src = vscode.Uri.joinPath(srcRoot, file);
+                const dest = vscode.Uri.joinPath(configDirUri, file);
+                try {
+                    await vscode.workspace.fs.stat(dest);
+                } catch (e) {
+                    await vscode.workspace.fs.copy(src, dest, { overwrite: false });
+                }
+            }
+
+            // 3. 注入人格与规范 (Personas & Styles)
+            // 这些是 Aria 灵魂的一部分，不属于业务资产
+            await this.syncDir(vscode.Uri.joinPath(srcRoot, 'agents'), vscode.Uri.joinPath(configDirUri, 'agents'), "Personas");
+            await this.syncDir(vscode.Uri.joinPath(srcRoot, 'codingstyle'), vscode.Uri.joinPath(configDirUri, 'codingstyle'), "Coding Styles");
+            await this.syncDir(vscode.Uri.joinPath(srcRoot, 'commands_prompt'), vscode.Uri.joinPath(configDirUri, 'commands_prompt'), "System Prompts");
+
+            Logger.info(`[OPGV] Soul bootstrapped with personas and styles.`);
+        } catch (e: any) {
+            Logger.error(`[OPGV] Soul bootstrap failed: ${e.message}`);
+        }
+    }
+
+    /**
+     * [Workflow Init] 初始化业务逻辑
+     * 由 /init 显式触发。仅负责搬入具体的生产指令 (TOML) 和技能 (MD)。
+     */
+    static async initializeWorkflow(extensionUri: vscode.Uri) {
+        const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+        if (!workspaceFolder) return;
+
+        const configDirUri = vscode.Uri.joinPath(workspaceFolder.uri, '.opengravity');
+
+        try {
+            // 1. 搬入生产力指令 (从 workflow_assets 拷贝)
+            await this.syncDir(
+                vscode.Uri.joinPath(extensionUri, 'assets', 'workflow_assets', 'commands'),
+                vscode.Uri.joinPath(configDirUri, 'commands'),
+                "Production Commands"
+            );
+
+            // 2. 搬入进阶技能 (skills/*.md)
+            await this.syncDir(
+                vscode.Uri.joinPath(extensionUri, 'assets', 'templates', 'skills'),
+                vscode.Uri.joinPath(configDirUri, 'skills'),
+                "Advanced Skills"
+            );
+
+            Logger.info(`[OPGV] Workflow production assets deployed.`);
+        } catch (error: any) {
+            Logger.error(`[OPGV] Workflow init failed: ${error.message}`);
+            throw error;
+        }
+    }
+
     private static async syncDir(srcUri: vscode.Uri, destUri: vscode.Uri, label: string) {
         const copyRecursive = async (src: vscode.Uri, dest: vscode.Uri) => {
             const entries = await vscode.workspace.fs.readDirectory(src);
             for (const [name, type] of entries) {
                 const sUri = vscode.Uri.joinPath(src, name);
                 const dUri = vscode.Uri.joinPath(dest, name);
-
                 if (type === vscode.FileType.Directory) {
-                    try { await vscode.workspace.fs.stat(dUri); } catch (e) {
-                        await vscode.workspace.fs.createDirectory(dUri);
-                    }
+                    try { await vscode.workspace.fs.stat(dUri); } catch (e) { await vscode.workspace.fs.createDirectory(dUri); }
                     await copyRecursive(sUri, dUri);
                 } else {
-                    // 核心逻辑：如果目标文件已存在，则跳过，不覆盖用户修改
-                    try {
-                        await vscode.workspace.fs.stat(dUri);
-                    } catch (e) {
-                        await vscode.workspace.fs.copy(sUri, dUri, { overwrite: false });
-                    }
+                    try { await vscode.workspace.fs.stat(dUri); } catch (e) { await vscode.workspace.fs.copy(sUri, dUri, { overwrite: false }); }
                 }
             }
         };
-
         try {
             await copyRecursive(srcUri, destUri);
-            Logger.info(`[OPGV] ${label} synchronized to .opengravity/`);
-        } catch (e: any) {
-            Logger.error(`[OPGV] Sync ${label} failed: ${e.message}`);
-        }
+            Logger.info(`[OPGV] ${label} synchronized.`);
+        } catch (e: any) { Logger.error(`[OPGV] Sync ${label} failed: ${e.message}`); }
     }
 }
