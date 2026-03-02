@@ -1,6 +1,7 @@
 .vscode/**
 .vscode-test/**
-src/**
+src/**/*.ts
+!src/webview/**
 .gitignore
 .yarnrc
 vsc-extension-quickstart.md
@@ -8,11 +9,10 @@ vsc-extension-quickstart.md
 **/eslint.config.mjs
 **/jest.config.js
 **/*.map
-**/*.ts
 **/.vscode-test.*
 TODO.md
 .opengravity/**
 debug_spawn.js
 *.vsix
 .DS_Store
-**/ .DS_Store
+**/.DS_Store

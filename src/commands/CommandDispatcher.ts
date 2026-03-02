@@ -35,7 +35,7 @@ export class CommandDispatcher {
         chatViewProvider: any
     ): Promise<CommandResult | null> {
         const trimmed = text.trim();
-        if (!trimmed) return null;
+        if (!trimmed) { return null; }
 
         const context: CommandContext = {
             ai, mcp, webview, extensionUri,

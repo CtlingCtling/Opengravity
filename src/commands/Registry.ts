@@ -145,7 +145,7 @@ export class CommandRegistry {
         // 重置非内核指令
         const allNames = Array.from(this.commands.keys());
         allNames.forEach(name => {
-            if (!this.kernelNames.has(name)) this.commands.delete(name);
+            if (!this.kernelNames.has(name)) { this.commands.delete(name); }
         });
         await this.loadAllCommands();
     }

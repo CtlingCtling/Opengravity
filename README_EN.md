@@ -41,12 +41,13 @@ Opengravity empowers the agent with controlled autonomy, ensuring safety while e
 ## ✌️ Getting Started
 
 1. **Install**: Load the `.vsix` or run in extension development host.
-2. **Init**: Type `/init` to scaffold the `.opengravity` structure.
-3. **Explore**:
+2. **API keys**：Search "opengravity" in vscode settings and input your API keys.
+3. **Init**: Type `/init` to scaffold the `.opengravity` structure.
+4. **Explore**:
   - `!ls` for the God Mode terminal.
   - `/help` to list all skills.
   - `@filename` to provide context.
-4. Have fun.
+5. **Have fun.**
 ## ⚒️ Tech Stack
 - **Frontend**: Pure JavaScript (ES6+) + CSS3 (Zero frameworks).
 - **Backend**: TypeScript + VS Code Extension API.
@@ -88,6 +89,5 @@ Key implementation files:
 
 ---
 
-$\mathcal{Code\quad with}$ ❤️ 
-$\mathcal{by\quad Ctling\quad \&\quad Echo.}$ 
+Code with ❤️ by Ctling & Echo.
  

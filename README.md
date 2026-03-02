@@ -37,11 +37,13 @@ Opengravity 赞同 OpenClaw 的部分有关 Agent 自主性的看法，并且在
 - **inline diff**：在对人格文件（ `.opengravity/` 中的文件）使用 `replace` 之后，只有小窗会显示执行前后的不同，以告知用户 Agent 的认知发生改变。如果对业务文件使用 `replace` 或 `write_file` 则会触发 `vscode.diff` 在主要窗口上显示 diff 。同时小窗也会显示 diff。
 ## ✌️ 开始使用
 1. **安装扩展**：加载 `.vsix` 或在 VS Code 中调试运行。
-2. **初始化**：在聊天框输入 `/init`，Opengravity 会自动在当前目录下创建 `.opengravity` 结构。
-3. **体验指令**：
+2. **输入API keys**：打开设置搜索：opengravity，输入 API keys。
+3. **初始化**：在聊天框输入 `/init`，Opengravity 会自动在当前目录下创建 `.opengravity` 结构。
+4. **体验指令**：
 - 输入 `!ls` 体验上帝模式终端。
 - 输入 `/help` 查看所有技能。
 - 输入 `@文件名` 将代码上下文喂给 AI。
+5. **Have fun.**
 ## ⚒️ 技术栈
 - **Frontend**: Pure JavaScript (ES6+) + CSS3 (No React/Vue/Tailwind)。
 - *Deps*: `marked` (渲染), `highlight.js` (高亮), `ansi_up` (终端转义)。
@@ -87,5 +89,4 @@ Opengravity 赞同 OpenClaw 的部分有关 Agent 自主性的看法，并且在
 
 ---
 
-$\mathcal{Code\quad with}$ ❤️ 
-$\mathcal{by\quad Ctling\quad \&\quad Echo.}$ 
+Code with ❤️ by Ctling & Echo.

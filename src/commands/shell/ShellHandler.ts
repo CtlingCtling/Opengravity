@@ -23,7 +23,7 @@ export class ShellHandler {
             // 2. 显示执行状态头部
             await context.webview.postMessage({ 
                 type: 'streamUpdate', 
-                value: `Running: \`${command}\`...\n`, 
+                value: `RUNNING: \`${command}\`...\n`, 
                 dataType: 'terminal' 
             });
 

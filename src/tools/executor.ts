@@ -42,7 +42,7 @@ export class ToolExecutor {
      */
     static async run_command(args: { command: string }, onOutput?: (chunk: string) => void): Promise<string> {
         const rootPath = this.getRootPath();
-        if (!rootPath) return "[❌] Error: No workspace folder opened.";
+        if (!rootPath) { return "[❌] Error: No workspace folder opened."; }
 
         // [核心安全黑名单]
         const dangerousPatterns = [
@@ -72,12 +72,12 @@ export class ToolExecutor {
             child.stdout.on('data', (data) => {
                 const chunk = data.toString();
                 combined += chunk;
-                if (onOutput) onOutput(chunk);
+                if (onOutput) { onOutput(chunk); }
             });
             child.stderr.on('data', (data) => {
                 const chunk = data.toString();
                 combined += chunk;
-                if (onOutput) onOutput(chunk);
+                if (onOutput) { onOutput(chunk); }
             });
 
             child.on('close', (code) => {

@@ -28,7 +28,6 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     private _pendingDiff?: { originalUri: vscode.Uri, newContent: string, diffUri: vscode.Uri }; 
     private _pendingToolCallId?: string; 
 
-    // [公开状态] 允许外部处理器访问
     public _isWaitingForApproval = false; 
     public _pendingCommand?: { command: string };
 
@@ -53,10 +52,8 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         this._view = webviewView;
         await this._stateManager.initialize();
 
-        // [UI 同步] 发送初始模式
         this._postWebviewMessage('updateMode', this._stateManager.mode);
 
-        // [Init 2.0] 初始化预检
         const workflowReady = await TemplateManager.isWorkflowInitialized();
         if (!workflowReady) {
             this._postWebviewMessage('updateStatus', 'not-initialized');
@@ -476,7 +473,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 
                 if (isAuto || isPersonality) {
                     // 3. [自进化/自动路径] 直接执行
-                    if (isPersonality && !isAuto) Logger.info(`[SELF-EVOLUTION] Opengravity action on: ${args.path}`);
+                    if (isPersonality && !isAuto) { Logger.info(`[SELF-EVOLUTION] Opengravity action on: ${args.path}`); }
                     result = (funcName === 'write_file') ? await ToolExecutor.write_file(args) : await ToolExecutor.replace(args);
                     
                     const icon = result.includes('Success') ? '✅' : '❌';
@@ -496,8 +493,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
                     isInterrupted = true;
                     continue;
                 }
-            }
- else if (funcName === 'run_command') {
+            } else if (funcName === 'run_command') {
                 const isAuto = this._stateManager.isAutonomous();
                 if (isAuto) {
                     result = await ToolExecutor.run_command(args, (chunk) => {

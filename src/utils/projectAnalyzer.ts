@@ -51,8 +51,7 @@ export class ProjectAnalyzer {
      * 生成架构蓝图 (Mermaid Flowchart)
      */
     static async generateBlueprint(rootUri: vscode.Uri): Promise<string> {
-        let mermaid = `graph TD
-    Root[Project Root] -->|contains| Core`;
+        let mermaid = `graph TD\n    Root[Project Root] -->|contains| Core`;
         
         const nodes: string[] = [];
         const edges: string[] = [];
