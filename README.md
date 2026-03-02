@@ -3,7 +3,7 @@
 # 🌏 Opengravity 
 ![借鉴了 Apple UI](https://img.shields.io/badge/UI-模仿_Apple-F5F5F7?logo=apple&logoColor=black)
 ![License](https://img.shields.io/badge/License-MIT-green)
-![model](https://img.shields.io/badge/Model-DeepSeek%2FClaude-orange)
+![model](https://img.shields.io/badge/Model-DeepSeek-orange)
 ![Platform](https://img.shields.io/badge/Platform-VSCode-blue)
 ![MCP](https://img.shields.io/badge/Supported-MCP-black)
 ## 🤔 概述
