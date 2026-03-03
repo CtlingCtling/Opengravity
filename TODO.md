@@ -12,9 +12,13 @@
 - [x] **交互验证**: 确认 `read_file` 免审批逻辑已实现且具有视觉反 馈。
 - [x] **IntelliSense**: 
 - [x] **品牌与文档**: 
-  *   [ ] **Icon**: 为 Opengravity 寻找/设计一个精致的图标。
+  *   [x] **Icon**: 为 Opengravity 寻找/设计一个精致的图标。
   *   [x] **README**: 撰写详细的技术架构说明与操作指南。
   *   [x] **License**: 添加 MIT 授权协议。
+
+### 🏁 Phase: Version One @priority:critical
+- [ ] **Agent Skills全面支持**
+- [ ] **InstinctCreate：自动Skills**
 
 ---
 

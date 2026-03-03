@@ -13,6 +13,7 @@ import { DiffContentProvider } from './utils/diffProvider';
 import { TemplateManager } from './utils/templateManager';
 import { SessionStateManager, OpengravityMode } from './session/StateManager';
 import { HeartbeatManager } from './session/HeartbeatManager';
+import { SkillManager } from './utils/skillManager';
 
 export class ChatViewProvider implements vscode.WebviewViewProvider {
     public static readonly viewType = 'opengravity.chatView';
@@ -374,6 +375,11 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     private async _ensureSystemPrompt() {
         if (this._historyManager.getHistory().length === 0) {
             let systemContent = this._systemPrompt;
+
+            // [新增] 发现并注入 Agent Skills 元数据
+            const skills = await SkillManager.discoverSkills();
+            systemContent += SkillManager.formatSkillsForPrompt(skills);
+
             const mcpPrompts = await this._mcpHost.getPromptsForAI();
             if (mcpPrompts.length > 0) {
                 systemContent += "\n\n## Available MCP Prompts:\n" + mcpPrompts.map(p => `- [${p.serverName}] ${p.name}: ${p.description}`).join('\n');

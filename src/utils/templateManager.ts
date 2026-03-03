@@ -137,7 +137,7 @@ export class TemplateManager {
         const configDirUri = vscode.Uri.joinPath(workspaceFolder.uri, '.opengravity');
         try {
             // 1. 创建地基：.opengravity 及其所有标准子目录
-            const soulDirs = ['', 'skills', 'agents', 'codingstyle', 'commands', 'sessions', 'commands_prompt', 'memory'];
+            const soulDirs = ['', 'skills', 'agents', 'codingstyle', 'commands', 'sessions', 'commands_prompt', 'memory', 'slashPrompts'];
             for (const dir of soulDirs) {
                 const dUri = vscode.Uri.joinPath(configDirUri, dir);
                 try { await vscode.workspace.fs.stat(dUri); } catch (e) {
@@ -189,7 +189,14 @@ export class TemplateManager {
                 "Production Commands"
             );
 
-            // 2. 搬入进阶技能 (skills/*.md)
+            // 2. [新增] 搬入指令提示词模板 (从 workflow_assets/slashPrompts 拷贝)
+            await this.syncDir(
+                vscode.Uri.joinPath(extensionUri, 'assets', 'workflow_assets', 'slashPrompts'),
+                vscode.Uri.joinPath(configDirUri, 'slashPrompts'),
+                "Slash Command Prompts"
+            );
+
+            // 3. 搬入进阶技能 (skills/*)
             await this.syncDir(
                 vscode.Uri.joinPath(extensionUri, 'assets', 'templates', 'skills'),
                 vscode.Uri.joinPath(configDirUri, 'skills'),

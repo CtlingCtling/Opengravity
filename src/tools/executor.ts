@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { promises as fs } from 'fs';
 import * as path from 'path';
+import * as os from 'os';
 import * as cp from 'child_process';
 import { Logger } from '../utils/logger';
 
@@ -139,5 +140,74 @@ export class ToolExecutor {
         } catch (e: any) {
             return `[❌] Replace failed: ${e.message}`;
         }
+    }
+
+    /**
+     * 激活技能：动态加载特定技能的完整指令 (Anthropic/Gemini CLI 标准)
+     * [机制增强] 现在会同步返回该技能的资源列表和路径锚点
+     */
+    static async activate_skill(args: { name: string }): Promise<string> {
+        const rootPath = this.getRootPath();
+        if (!rootPath) return "[❌] Error: No workspace folder opened.";
+
+        const userHome = os.homedir();
+        const searchPaths = [
+            path.join(rootPath, '.opengravity', 'skills'),
+            path.join(userHome, '.opengravity', 'skills')
+        ];
+        
+        for (const skillsDir of searchPaths) {
+            try {
+                const entries = await fs.readdir(skillsDir, { withFileTypes: true });
+                for (const entry of entries) {
+                    if (entry.isDirectory()) {
+                        const skillFolderPath = path.join(skillsDir, entry.name);
+                        const skillMdPath = path.join(skillFolderPath, 'SKILL.md');
+                        
+                        try {
+                            const content = await fs.readFile(skillMdPath, 'utf-8');
+                            if (content.includes(`name: ${args.name}`)) {
+                                // [机制补全] 扫描该技能目录下的所有资源
+                                const allFiles = await this.recursiveReaddir(skillFolderPath);
+                                const resourceManifest = allFiles
+                                    .filter(f => !f.endsWith('SKILL.md'))
+                                    .map(f => `- ${path.relative(skillFolderPath, f)}`)
+                                    .join('\n');
+
+                                return `<activated_skill>
+<instructions>
+${content}
+</instructions>
+
+<metadata>
+Skill_Name: ${args.name}
+Base_Directory: ${skillFolderPath}
+Available_Resources:
+${resourceManifest || "No extra scripts or assets found."}
+</metadata>
+
+<system_note>
+You can now access the files listed under 'Available_Resources' using their relative paths combined with the 'Base_Directory'. Use 'run_command' for scripts and 'read_file' for assets.
+</system_note>
+</activated_skill>`;
+                            }
+                        } catch (e) {}
+                    }
+                }
+            } catch (e) {}
+        }
+        return `[❌] Error: Skill '${args.name}' not found.`;
+    }
+
+    /**
+     * 递归读取目录文件 (辅助方法)
+     */
+    private static async recursiveReaddir(dir: string): Promise<string[]> {
+        const dirents = await fs.readdir(dir, { withFileTypes: true });
+        const files = await Promise.all(dirents.map((dirent) => {
+            const res = path.resolve(dir, dirent.name);
+            return dirent.isDirectory() ? this.recursiveReaddir(res) : res;
+        }));
+        return Array.prototype.concat(...files);
     }
 }

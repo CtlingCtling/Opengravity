@@ -105,5 +105,21 @@ export const OPGV_TOOLS = [
             },
             strict: true
         }
+    },
+    {
+        type: "function",
+        function: {
+            name: "activate_skill",
+            description: "Activates a specialized agent skill by name. Returns the skill's instructions wrapped in tags. Use this when you identify a task that matches a skill's description. ONLY use names exactly as they appear in the available skills section.",
+            parameters: {
+                type: "object",
+                properties: {
+                    name: { type: "string", description: "The name of the skill to activate (e.g., 'code-reviewer')." }
+                },
+                required: ["name"],
+                additionalProperties: false
+            },
+            strict: true
+        }
     }
 ];
