@@ -81,7 +81,10 @@ export class ToolExecutor {
                 if (onOutput) { onOutput(chunk); }
             });
 
-            child.on('close', (code) => {
+            child.on('close', async (code) => {
+                if (code === 0) {
+                    await this.logAction("RUN_COMMAND", args.command);
+                }
                 resolve(combined || `(Process exited with code ${code})`);
             });
 
@@ -89,6 +92,24 @@ export class ToolExecutor {
                 resolve(`[❌] Spawning Error: ${err.message}`);
             });
         });
+    }
+
+    /**
+     * [Instinct] 记录用户行为到 ActionLogger
+     */
+    private static async logAction(action: string, detail: string) {
+        const rootPath = this.getRootPath();
+        if (!rootPath) return;
+
+        const logPath = path.join(rootPath, '.opengravity', 'userActionLogger.md');
+        const timestamp = new Date().toLocaleString();
+        const entry = `\n[${timestamp}] **Action**: ${action} | **Detail**: ${detail}\n`;
+
+        try {
+            await fs.appendFile(logPath, entry, 'utf-8');
+        } catch (e) {
+            // 静默失败
+        }
     }
 
     static async read_file(args: { path: string }): Promise<string> {
@@ -111,6 +132,7 @@ export class ToolExecutor {
             const dir = path.dirname(fullPath);
             await fs.mkdir(dir, { recursive: true });
             await fs.writeFile(fullPath, args.content, 'utf-8');
+            await this.logAction("WRITE_FILE", args.path);
             return "[✅] 文件已成功写入。";
         } catch (e: any) {
             Logger.error(`Error writing file: ${e.message}`, e);
@@ -136,6 +158,7 @@ export class ToolExecutor {
 
             const newContent = content.slice(0, firstIndex) + args.new_string + content.slice(firstIndex + args.old_string.length);
             await fs.writeFile(fullPath, newContent, 'utf-8');
+            await this.logAction("REPLACE", `${args.path} (${args.instruction})`);
             return `Successfully applied changes to ${args.path}`;
         } catch (e: any) {
             return `[❌] Replace failed: ${e.message}`;

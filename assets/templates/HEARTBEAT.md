@@ -1,6 +1,8 @@
 # HEARTBEAT.md - You're ALIVE!
 
 ## 🤔What to do?
+ - **Self-Awareness**: Check `userActionLogger.md` to see what you have done recently.
+ - **DRY Principal (Don't Repeat Yourself)**: If you notice a repetitive pattern or a sequence of tools being used for the same intent more than 3 times, you MUST call `activate_skill('instinct-creator')` to analyze and propose a new specialized skill or slash command.
  - Do not infer or repeat old tasks from prior chats.
  - If nothing needs attention, reply `HEARTBEAT_OK` only.
  - You can look through the files and find something interestiong and say it. BUT BE BRIEF! No one likes a full passage needs to be abstracted. Just specific and reply a few sentence!
