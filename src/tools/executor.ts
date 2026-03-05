@@ -99,7 +99,7 @@ export class ToolExecutor {
      */
     private static async logAction(action: string, detail: string) {
         const rootPath = this.getRootPath();
-        if (!rootPath) return;
+        if (!rootPath) { return; }
 
         const logPath = path.join(rootPath, '.opengravity', 'userActionLogger.md');
         const timestamp = new Date().toLocaleString();
@@ -171,7 +171,7 @@ export class ToolExecutor {
      */
     static async activate_skill(args: { name: string }): Promise<string> {
         const rootPath = this.getRootPath();
-        if (!rootPath) return "[❌] Error: No workspace folder opened.";
+        if (!rootPath) { return "[❌] Error: No workspace folder opened."; }
 
         const userHome = os.homedir();
         const searchPaths = [
@@ -197,22 +197,7 @@ export class ToolExecutor {
                                     .map(f => `- ${path.relative(skillFolderPath, f)}`)
                                     .join('\n');
 
-                                return `<activated_skill>
-<instructions>
-${content}
-</instructions>
-
-<metadata>
-Skill_Name: ${args.name}
-Base_Directory: ${skillFolderPath}
-Available_Resources:
-${resourceManifest || "No extra scripts or assets found."}
-</metadata>
-
-<system_note>
-You can now access the files listed under 'Available_Resources' using their relative paths combined with the 'Base_Directory'. Use 'run_command' for scripts and 'read_file' for assets.
-</system_note>
-</activated_skill>`;
+                                return `<activated_skill>\n<instructions>\n${content}\n</instructions>\n\n<metadata>\nSkill_Name: ${args.name}\nBase_Directory: ${skillFolderPath}\nAvailable_Resources:\n${resourceManifest || "No extra scripts or assets found."}\n</metadata>\n\n<system_note>\nYou can now access the files listed under 'Available_Resources' using their relative paths combined with the 'Base_Directory'. Use 'run_command' for scripts and 'read_file' for assets.\n</system_note>\n</activated_skill>`;
                             }
                         } catch (e) {}
                     }
